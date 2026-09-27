@@ -1,7 +1,12 @@
 import type {
   AvailabilitySlot,
+  DemoState,
+  Incident,
   IncidentStatus,
   Loan,
+  LoanExtension,
+  PaymentTransaction,
+  Reminder,
   Reservation,
   TermsSnapshot,
 } from '@/types/domain';
@@ -21,11 +26,12 @@ export function economicBreakdown(
   snapshot: Pick<
     TermsSnapshot,
     'dailyRate' | 'startAt' | 'endAt' | 'guaranteeAmount'
-  >,
+  > &
+    Partial<Pick<TermsSnapshot, 'providerFee'>>,
 ) {
   const days = rentalDays(snapshot.startAt, snapshot.endAt);
   const fee = snapshot.dailyRate * days;
-  const serviceFee = Math.round(fee * 0.08 * 100) / 100;
+  const serviceFee = snapshot.providerFee ?? 0;
   return {
     days,
     fee,
@@ -33,6 +39,195 @@ export function economicBreakdown(
     guarantee: snapshot.guaranteeAmount,
     total: fee + serviceFee + snapshot.guaranteeAmount,
   };
+}
+
+export function hasReservationCollision(
+  slots: AvailabilitySlot[],
+  startAt: string,
+  endAt: string,
+  ignoredReservationId?: string,
+) {
+  return slots.some(
+    (slot) =>
+      slot.status === 'RESERVED' &&
+      slot.reservationId !== ignoredReservationId &&
+      overlaps(startAt, endAt, slot.startAt, slot.endAt),
+  );
+}
+
+export function replaceReservedInterval(
+  slots: AvailabilitySlot[],
+  reservationId: string,
+  startAt: string,
+  endAt: string,
+) {
+  return [
+    ...slots.filter(
+      (slot) =>
+        !(slot.status === 'RESERVED' && slot.reservationId === reservationId),
+    ),
+    {
+      id: `slot-reserved-${reservationId}`,
+      startAt,
+      endAt,
+      status: 'RESERVED' as const,
+      reservationId,
+    },
+  ];
+}
+
+export function isParticipant(
+  operation: { borrowerId: string; lenderId: string },
+  userId: string,
+) {
+  return operation.borrowerId === userId || operation.lenderId === userId;
+}
+
+export function canViewReservation(
+  state: DemoState,
+  id: string,
+  userId: string,
+) {
+  const item = state.reservations.find((reservation) => reservation.id === id);
+  return Boolean(item && isParticipant(item, userId));
+}
+
+export function canViewLoan(state: DemoState, id: string, userId: string) {
+  const item = state.loans.find((loan) => loan.id === id);
+  return Boolean(item && isParticipant(item, userId));
+}
+
+export function canViewIncident(
+  state: DemoState,
+  incident: Incident | undefined,
+  userId: string,
+) {
+  if (!incident) return false;
+  const loan = state.loans.find(
+    (candidate) => candidate.id === incident.loanId,
+  );
+  return Boolean(loan && isParticipant(loan, userId));
+}
+
+export function canViewCounterpartyPhone(
+  operation: { borrowerId: string; lenderId: string; status: string },
+  userId: string,
+) {
+  return (
+    isParticipant(operation, userId) &&
+    !['PENDING', 'CANCELLED', 'COMPLETED'].includes(operation.status)
+  );
+}
+
+export function canRequestListing(
+  listing: { ownerId: string; status: string },
+  userId: string,
+) {
+  return listing.ownerId !== userId && listing.status === 'ACTIVE';
+}
+
+export function canManageListing(
+  listing: { ownerId: string } | undefined,
+  userId: string,
+) {
+  return listing?.ownerId === userId;
+}
+
+export function validPartialCapture(
+  amount: number,
+  remainingGuarantee: number,
+) {
+  return amount > 0 && amount <= remainingGuarantee;
+}
+
+export function mayRateLoan(loan: Loan, userId: string, targetUserId: string) {
+  return (
+    loan.status === 'COMPLETED' &&
+    isParticipant(loan, userId) &&
+    isParticipant(loan, targetUserId) &&
+    userId !== targetUserId &&
+    !loan.ratedBy.includes(userId)
+  );
+}
+
+export function canAcceptTerms(authenticated: boolean) {
+  return authenticated;
+}
+
+export function statusAfterReceiptConfirmation() {
+  return 'ACTIVE' as const;
+}
+
+export function dueAfterExtension(
+  currentReturnAt: string,
+  extension: Pick<
+    LoanExtension,
+    'status' | 'paymentStatus' | 'proposedReturnAt'
+  >,
+) {
+  return extension.status === 'ACCEPTED' &&
+    extension.paymentStatus === 'RELEASED'
+    ? extension.proposedReturnAt
+    : currentReturnAt;
+}
+
+export function statusAfterReturnConfirmation(hasOpenIncident: boolean) {
+  return hasOpenIncident
+    ? ('RETURN_CONFIRMED_PENDING_INCIDENT' as const)
+    : ('COMPLETED' as const);
+}
+
+export function statusAfterIncidentResolution(hasRemainingIncident: boolean) {
+  return hasRemainingIncident
+    ? ('RETURN_CONFIRMED_PENDING_INCIDENT' as const)
+    : ('COMPLETED' as const);
+}
+
+export function cancellationRefundAmount(
+  snapshot: TermsSnapshot,
+  actor: 'BORROWER' | 'LENDER',
+) {
+  const amounts = economicBreakdown(snapshot);
+  const rate =
+    actor === 'LENDER'
+      ? snapshot.cancellationPolicy.lenderRefundRate
+      : snapshot.cancellationPolicy.borrowerRefundRate;
+  return (amounts.fee + amounts.serviceFee) * rate;
+}
+
+export function shouldMarkOverdue(
+  status: Loan['status'],
+  dueAt: string,
+  now: string,
+) {
+  return status === 'ACTIVE' && new Date(now) > new Date(dueAt);
+}
+
+export function updateReturnReminders(
+  reminders: Reminder[],
+  operationId: string,
+  dueAt: string,
+) {
+  return reminders.map((reminder) =>
+    reminder.operationId === operationId && reminder.kind === 'RETURN'
+      ? { ...reminder, dueAt }
+      : reminder,
+  );
+}
+
+export function removeOperationReminders(
+  reminders: Reminder[],
+  operationId: string,
+) {
+  return reminders.filter((reminder) => reminder.operationId !== operationId);
+}
+
+export function transactionRoute(transaction: PaymentTransaction) {
+  if (transaction.incidentId) return `/incidents/${transaction.incidentId}`;
+  if (transaction.loanId) return `/loans/${transaction.loanId}`;
+  if (transaction.reservationId)
+    return `/reservations/${transaction.reservationId}`;
+  return '/transactions';
 }
 
 export function overlaps(

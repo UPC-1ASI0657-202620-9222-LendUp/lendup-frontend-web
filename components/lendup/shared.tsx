@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Evidence, Listing, User } from '@/types/domain';
+import { filesToDataUrls } from '@/lib/file-data';
 
 export const statusLabels: Record<string, string> = {
   PENDING: 'Pendiente',
@@ -36,13 +37,18 @@ export const statusLabels: Record<string, string> = {
   PENDING_RECEIPT: 'Pendiente de recepción',
   ACTIVE: 'Activo',
   RETURN_RECORDED: 'Devolución registrada',
+  RETURN_CONFIRMED_PENDING_INCIDENT:
+    'Devolución confirmada · incidencia pendiente',
   OVERDUE: 'Vencido',
   PROCESSING: 'Procesando',
+  SENDING: 'Enviando',
+  SENT: 'Enviado',
   PAYMENT_PENDING: 'Pago pendiente',
   PENDING_RELEASE: 'Pendiente de liberación',
   RELEASED: 'Liberado',
   REFUNDED: 'Reembolsado',
   FAILED: 'Fallido',
+  VERIFIED: 'Verificado',
   NOT_REQUIRED: 'No requerida',
   HELD: 'Retenida',
   PARTIALLY_CAPTURED: 'Afectada parcialmente',
@@ -338,14 +344,14 @@ export function LoadingSkeleton({ cards = 3 }: { cards?: number }) {
 }
 
 export function EvidenceUploader({
-  stage,
+  phase,
   author,
   authorId,
   value,
   onChange,
   label = 'Fotos, videos y notas',
 }: {
-  stage: Evidence['stage'];
+  phase: Evidence['phase'];
   author: string;
   authorId: string;
   value: Evidence[];
@@ -354,19 +360,29 @@ export function EvidenceUploader({
 }) {
   const inputId = useId();
   const [note, setNote] = useState('');
-  const addFiles = (files: FileList | null) => {
+  const [fileError, setFileError] = useState('');
+  const addFiles = async (files: FileList | null) => {
     if (!files) return;
-    const additions: Evidence[] = Array.from(files).map((file) => ({
-      id: `evidence-${Date.now()}-${file.name}`,
-      stage,
-      type: file.type.startsWith('video/') ? 'VIDEO' : 'PHOTO',
-      label: file.name,
-      author,
-      authorId,
-      date: new Date().toISOString(),
-      url: URL.createObjectURL(file),
-    }));
-    onChange([...value, ...additions]);
+    try {
+      const encoded = await filesToDataUrls(files);
+      const additions: Evidence[] = encoded.map(({ file, dataUrl }) => ({
+        id: `evidence-${Date.now()}-${file.name}`,
+        phase,
+        type: file.type.startsWith('video/') ? 'VIDEO' : 'PHOTO',
+        label: file.name,
+        description: file.name,
+        author,
+        authorId,
+        createdAt: new Date().toISOString(),
+        url: dataUrl,
+      }));
+      onChange([...value, ...additions]);
+      setFileError('');
+    } catch (error) {
+      setFileError(
+        error instanceof Error ? error.message : 'No se pudo leer el archivo.',
+      );
+    }
   };
   const addNote = () => {
     if (!note.trim()) return;
@@ -374,12 +390,13 @@ export function EvidenceUploader({
       ...value,
       {
         id: `evidence-note-${Date.now()}`,
-        stage,
+        phase,
         type: 'NOTE',
         label: note.trim(),
+        description: note.trim(),
         author,
         authorId,
-        date: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
       },
     ]);
     setNote('');
@@ -421,6 +438,11 @@ export function EvidenceUploader({
           Agregar nota
         </Button>
       </div>
+      {fileError && (
+        <p className="field-error" role="alert">
+          {fileError}
+        </p>
+      )}
       {value.length > 0 && (
         <div className="evidence-previews">
           {value.map((item) => (

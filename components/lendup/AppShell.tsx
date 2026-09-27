@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
   Link,
   NavLink,
@@ -25,7 +26,15 @@ import {
   UsersRound,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import { useDemo } from '@/stores/demo-store';
+import { DEMO_MODE } from '@/lib/demo-config';
 
 const nav = [
   { to: '/app', label: 'Inicio', icon: Home },
@@ -45,11 +54,24 @@ export function AppShell() {
   const { state, switchUser, resetDemo, logout } = useDemo();
   const navigate = useNavigate();
   const location = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const current = state.users.find((user) => user.id === state.currentUserId)!;
   const unread = state.notifications.filter(
     (item) => item.userId === current.id && !item.read,
   ).length;
-  const showDemoControls = process.env.NODE_ENV !== 'production';
+  const visibleNav =
+    current.role === 'ADMIN'
+      ? nav.filter((item) =>
+          ['/app', '/notifications', '/profile'].includes(item.to),
+        )
+      : nav;
+  const mobilePrimaryNav =
+    current.role === 'ADMIN'
+      ? visibleNav.slice(0, 2)
+      : visibleNav
+          .slice(0, 2)
+          .concat(visibleNav.slice(5, 6), visibleNav.slice(9, 10));
+  const showDemoControls = DEMO_MODE;
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -60,7 +82,7 @@ export function AppShell() {
           <span>LendUp</span>
         </Link>
         <nav aria-label="Navegación principal">
-          {nav.map(({ to, label, icon: Icon }) => (
+          {visibleNav.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -178,20 +200,48 @@ export function AppShell() {
         </main>
       </div>
       <nav className="mobile-nav" aria-label="Navegación móvil">
-        {nav
-          .slice(0, 2)
-          .concat(nav.slice(5, 6), nav.slice(9, 10))
-          .map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={to}>
-              <Icon />
-              <span>{label}</span>
-            </NavLink>
-          ))}
-        <button type="button" onClick={() => navigate('/profile')}>
+        {mobilePrimaryNav.map(({ to, label, icon: Icon }) => (
+          <NavLink key={to} to={to}>
+            <Icon />
+            <span>{label}</span>
+          </NavLink>
+        ))}
+        <button type="button" onClick={() => setMobileMenuOpen(true)}>
           <Menu />
           <span>Menú</span>
         </button>
       </nav>
+      <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+        <SheetContent side="bottom" className="mobile-menu-sheet">
+          <SheetHeader>
+            <SheetTitle>Navegación de LendUp</SheetTitle>
+            <SheetDescription>
+              Accede a todas las operaciones y ajustes de tu cuenta.
+            </SheetDescription>
+          </SheetHeader>
+          <nav aria-label="Navegación móvil secundaria">
+            {visibleNav.slice(2).map(({ to, label, icon: Icon }) => (
+              <NavLink
+                key={to}
+                to={to}
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Icon />
+                <span>{label}</span>
+              </NavLink>
+            ))}
+            {current.role === 'ADMIN' && (
+              <NavLink
+                to="/admin/incidents"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <ShieldCheck />
+                <span>Administración</span>
+              </NavLink>
+            )}
+          </nav>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

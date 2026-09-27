@@ -90,7 +90,11 @@ await run('Flujo A · pago y garantía', async () => {
   await page.goto(`${baseURL}/reservations/${dynamicReservationId}/checkout`, {
     waitUntil: 'networkidle',
   });
-  await page.getByText('Plin', { exact: true }).click();
+  await page
+    .locator('.payment-methods')
+    .first()
+    .getByText('Plin', { exact: true })
+    .click();
   await page.getByRole('button', { name: 'Confirmar pago y garantía' }).click();
   await page.waitForURL(`**/reservations/${dynamicReservationId}`);
   await expectText('Pendiente de liberación');
@@ -174,6 +178,22 @@ await run('Flujo A · extensión con costo', async () => {
     waitUntil: 'networkidle',
   });
   await page.getByRole('button', { name: 'Aceptar extensión' }).click();
+  const beforePayment = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('lendup-demo-state-v2')),
+  );
+  const pendingLoan = beforePayment.loans.find(
+    (loan) => loan.id === dynamicLoanId,
+  );
+  if (
+    pendingLoan.currentReturnAt.includes('10-23') ||
+    pendingLoan.extensions.at(-1)?.status !== 'PAYMENT_PENDING'
+  )
+    throw new Error('La extensión cambió la fecha antes del pago');
+  await switchUser('alexandra');
+  await page.goto(`${baseURL}/loans/${dynamicLoanId}`, {
+    waitUntil: 'networkidle',
+  });
+  await page.getByRole('button', { name: /Pagar extensión/ }).click();
   const state = await page.evaluate(() =>
     JSON.parse(localStorage.getItem('lendup-demo-state-v2')),
   );
@@ -184,6 +204,12 @@ await run('Flujo A · extensión con costo', async () => {
     )
   )
     throw new Error('Falta EXTENSION_PAYMENT');
+  if (
+    !state.loans
+      .find((loan) => loan.id === dynamicLoanId)
+      .currentReturnAt.includes('10-23')
+  )
+    throw new Error('El pago de extensión no actualizó la fecha');
 });
 
 await run('Flujo C · cancelación antes de recepción', async () => {

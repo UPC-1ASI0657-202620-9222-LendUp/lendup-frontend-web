@@ -38,6 +38,7 @@ import {
   shortDate,
 } from '@/components/lendup/shared';
 import { useDemo } from '@/stores/demo-store';
+import { fileToDataUrl } from '@/lib/file-data';
 
 export function DashboardPage() {
   const { state } = useDemo();
@@ -307,12 +308,16 @@ type CalendarEvent = {
 };
 export function CalendarPage() {
   const { state } = useDemo();
-  const [cursor, setCursor] = useState(new Date('2026-09-01T12:00:00'));
+  const [cursor, setCursor] = useState(new Date());
   const [view, setView] = useState<'month' | 'week'>('month');
   const userId = state.currentUserId;
   const events = useMemo<CalendarEvent[]>(() => {
     const loans = state.loans
-      .filter((item) => item.borrowerId === userId || item.lenderId === userId)
+      .filter(
+        (item) =>
+          (item.borrowerId === userId || item.lenderId === userId) &&
+          item.status !== 'COMPLETED',
+      )
       .flatMap((item) => [
         {
           id: `${item.id}-start`,
@@ -330,7 +335,11 @@ export function CalendarPage() {
         },
       ]);
     const reservations = state.reservations
-      .filter((item) => item.borrowerId === userId || item.lenderId === userId)
+      .filter(
+        (item) =>
+          (item.borrowerId === userId || item.lenderId === userId) &&
+          item.status !== 'CANCELLED',
+      )
       .map((item) => ({
         id: item.id,
         date: new Date(item.snapshot.startAt),
@@ -390,7 +399,7 @@ export function CalendarPage() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => setCursor(new Date('2026-09-26T12:00:00'))}
+              onClick={() => setCursor(new Date())}
             >
               Hoy
             </Button>
@@ -445,7 +454,7 @@ export function CalendarPage() {
             return (
               <div
                 key={key}
-                className={`calendar-day ${key === '2026-09-26' ? 'today' : ''} ${date.getMonth() !== cursor.getMonth() && view === 'month' ? 'outside' : ''}`}
+                className={`calendar-day ${key === new Date().toISOString().slice(0, 10) ? 'today' : ''} ${date.getMonth() !== cursor.getMonth() && view === 'month' ? 'outside' : ''}`}
               >
                 <span>{date.getDate()}</span>
                 {events
@@ -487,14 +496,17 @@ export function TransactionsPage() {
   );
   const download = () => {
     const csv = [
-      'Fecha,Operación,Préstamo,Monto,Método,Estado',
+      'Fecha,Operación,Reserva,Préstamo,Incidencia,Monto,Método,Referencia,Estado',
       ...rows.map((row) =>
         [
-          row.date,
+          row.createdAt,
           transactionLabels[row.type],
+          row.reservationId,
           row.loanId,
+          row.incidentId,
           row.amount,
           row.method,
+          row.providerReference,
           row.status,
         ].join(','),
       ),
@@ -534,26 +546,54 @@ export function TransactionsPage() {
                 <tr>
                   <th>Fecha</th>
                   <th>Operación</th>
+                  <th>Reserva</th>
                   <th>Préstamo</th>
+                  <th>Incidencia</th>
                   <th>Monto</th>
                   <th>Medio</th>
+                  <th>Referencia</th>
                   <th>Estado</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id}>
-                    <td>{shortDate(row.date)}</td>
+                    <td>{shortDate(row.createdAt)}</td>
                     <td>{transactionLabels[row.type]}</td>
                     <td>
-                      <Link to={`/loans/${row.loanId}`}>
-                        {row.loanId.toUpperCase()}
-                      </Link>
+                      {row.reservationId ? (
+                        <Link to={`/reservations/${row.reservationId}`}>
+                          {row.reservationId.toUpperCase()}
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td>
+                      {row.loanId ? (
+                        <Link to={`/loans/${row.loanId}`}>
+                          {row.loanId.toUpperCase()}
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td>
+                      {row.incidentId ? (
+                        <Link to={`/incidents/${row.incidentId}`}>
+                          {row.incidentId}
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td>
                       <strong>{money(row.amount)}</strong>
                     </td>
                     <td>{row.method}</td>
+                    <td>
+                      <code>{row.providerReference}</code>
+                    </td>
                     <td>
                       <StatusBadge status={row.status} />
                     </td>
@@ -578,6 +618,8 @@ export function ProfilePage() {
   const navigate = useNavigate();
   const user = state.users.find((item) => item.id === state.currentUserId)!;
   const [open, setOpen] = useState(false);
+  const [avatarError, setAvatarError] = useState('');
+  const [saved, setSaved] = useState(false);
   const [form, setForm] = useState({
     avatar: user.avatar ?? '',
     career: user.career,
@@ -613,6 +655,11 @@ export function ProfilePage() {
           Cerrar sesión
         </Button>
       </div>
+      {saved && (
+        <output className="success-text">
+          Perfil actualizado correctamente.
+        </output>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
@@ -626,15 +673,28 @@ export function ProfilePage() {
             <input
               type="file"
               accept="image/*"
-              onChange={(event) => {
+              onChange={async (event) => {
                 const file = event.target.files?.[0];
-                if (file)
-                  setForm((current) => ({
-                    ...current,
-                    avatar: URL.createObjectURL(file),
-                  }));
+                if (file) {
+                  try {
+                    const avatar = await fileToDataUrl(file);
+                    setForm((current) => ({ ...current, avatar }));
+                    setAvatarError('');
+                  } catch (error) {
+                    setAvatarError(
+                      error instanceof Error
+                        ? error.message
+                        : 'No se pudo leer el avatar.',
+                    );
+                  }
+                }
               }}
             />
+            {avatarError && (
+              <small className="field-error" role="alert">
+                {avatarError}
+              </small>
+            )}
           </label>
           {form.avatar && (
             <img
@@ -700,6 +760,7 @@ export function ProfilePage() {
               onClick={() => {
                 updateProfile(form);
                 setOpen(false);
+                setSaved(true);
               }}
             >
               Guardar cambios

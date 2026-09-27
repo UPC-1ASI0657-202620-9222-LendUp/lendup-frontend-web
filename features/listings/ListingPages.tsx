@@ -52,7 +52,12 @@ import {
 } from '@/components/lendup/shared';
 import { useDemo } from '@/stores/demo-store';
 import { listingService } from '@/services/domain-services';
-import { economicBreakdown, isPeriodAvailable } from '@/lib/business-rules';
+import {
+  economicBreakdown,
+  isPeriodAvailable,
+  overlaps,
+} from '@/lib/business-rules';
+import { filesToDataUrls } from '@/lib/file-data';
 import type { AvailabilitySlot, ListingMedia } from '@/types/domain';
 
 export function ExplorePage() {
@@ -383,8 +388,15 @@ function RequestDialog({
   const { state, createRequest } = useDemo();
   const navigate = useNavigate();
   const item = state.listings.find((listing) => listing.id === listingId)!;
-  const [startAt, setStartAt] = useState('2026-10-15T09:00');
-  const [endAt, setEndAt] = useState('2026-10-17T18:00');
+  const toLocalInput = (date: Date) =>
+    new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+      .toISOString()
+      .slice(0, 16);
+  const initialStart = new Date(Date.now() + 86_400_000);
+  const [startAt, setStartAt] = useState(toLocalInput(initialStart));
+  const [endAt, setEndAt] = useState(
+    toLocalInput(new Date(initialStart.getTime() + 2 * 86_400_000)),
+  );
   const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState('');
   const available = Boolean(
@@ -644,6 +656,7 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
   const navigate = useNavigate();
   const existing = state.listings.find((item) => item.id === id);
   const [media, setMedia] = useState<ListingMedia[]>(existing?.media ?? []);
+  const [fileError, setFileError] = useState('');
   const {
     register,
     handleSubmit,
@@ -678,19 +691,27 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
         action="Volver"
       />
     );
-  const addMedia = (files: FileList | null) => {
+  const addMedia = async (files: FileList | null) => {
     if (!files) return;
-    setMedia((current) => [
-      ...current,
-      ...Array.from(files).map((file) => ({
-        id: `media-${Date.now()}-${file.name}`,
-        type: file.type.startsWith('video/')
-          ? ('VIDEO' as const)
-          : ('PHOTO' as const),
-        url: URL.createObjectURL(file),
-        name: file.name,
-      })),
-    ]);
+    try {
+      const encoded = await filesToDataUrls(files);
+      setMedia((current) => [
+        ...current,
+        ...encoded.map(({ file, dataUrl }) => ({
+          id: `media-${Date.now()}-${file.name}`,
+          type: file.type.startsWith('video/')
+            ? ('VIDEO' as const)
+            : ('PHOTO' as const),
+          url: dataUrl,
+          name: file.name,
+        })),
+      ]);
+      setFileError('');
+    } catch (error) {
+      setFileError(
+        error instanceof Error ? error.message : 'No se pudo leer la imagen.',
+      );
+    }
   };
   const submit = (values: ListingValues) => {
     const image =
@@ -819,6 +840,11 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
             multiple
             onChange={(event) => addMedia(event.target.files)}
           />
+          {fileError && (
+            <p className="field-error" role="alert">
+              {fileError}
+            </p>
+          )}
           <div className="media-previews">
             {media.map((item) => (
               <article key={item.id}>
@@ -903,8 +929,16 @@ export function AvailabilityPage() {
   const [slots, setSlots] = useState<AvailabilitySlot[]>(
     item?.availabilitySlots.filter((slot) => slot.status === 'AVAILABLE') ?? [],
   );
-  const [startAt, setStartAt] = useState('2026-10-20T09:00');
-  const [endAt, setEndAt] = useState('2026-10-20T18:00');
+  const future = new Date(Date.now() + 86_400_000);
+  const localValue = (date: Date) => {
+    const offset = date.getTimezoneOffset() * 60_000;
+    return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+  };
+  const [startAt, setStartAt] = useState(localValue(future));
+  const [endAt, setEndAt] = useState(
+    localValue(new Date(future.getTime() + 3_600_000)),
+  );
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   if (!item)
     return (
@@ -921,15 +955,26 @@ export function AvailabilityPage() {
       setMessage('La hora final debe ser posterior a la inicial.');
       return;
     }
-    setSlots((current) => [
-      ...current,
-      {
-        id: `slot-${Date.now()}`,
-        startAt: new Date(startAt).toISOString(),
-        endAt: new Date(endAt).toISOString(),
-        status: 'AVAILABLE',
-      },
-    ]);
+    if (
+      reserved.some((slot) =>
+        overlaps(startAt, endAt, slot.startAt, slot.endAt),
+      )
+    ) {
+      setMessage('El intervalo se superpone con un periodo reservado.');
+      return;
+    }
+    const nextSlot = {
+      id: editingId ?? `slot-${Date.now()}`,
+      startAt: new Date(startAt).toISOString(),
+      endAt: new Date(endAt).toISOString(),
+      status: 'AVAILABLE' as const,
+    };
+    setSlots((current) =>
+      editingId
+        ? current.map((slot) => (slot.id === editingId ? nextSlot : slot))
+        : [...current, nextSlot],
+    );
+    setEditingId(null);
     setMessage('');
   };
   return (
@@ -942,8 +987,8 @@ export function AvailabilityPage() {
           <Button
             type="button"
             onClick={() => {
-              saveAvailability(item.id, slots);
-              setMessage('Disponibilidad guardada.');
+              const result = saveAvailability(item.id, slots);
+              setMessage(result.message);
             }}
           >
             Guardar disponibilidad
@@ -970,7 +1015,7 @@ export function AvailabilityPage() {
           </label>
           <Button type="button" variant="outline" onClick={add}>
             <Plus />
-            Agregar intervalo
+            {editingId ? 'Actualizar intervalo' : 'Agregar intervalo'}
           </Button>
         </div>
         {message && (
@@ -991,19 +1036,34 @@ export function AvailabilityPage() {
                   <Check />
                   {shortDate(slot.startAt)} – {shortDate(slot.endAt)}
                 </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Eliminar intervalo"
-                  onClick={() =>
-                    setSlots((current) =>
-                      current.filter((candidate) => candidate.id !== slot.id),
-                    )
-                  }
-                >
-                  <Trash2 />
-                </Button>
+                <span className="slot-actions">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Editar intervalo"
+                    onClick={() => {
+                      setEditingId(slot.id);
+                      setStartAt(localValue(new Date(slot.startAt)));
+                      setEndAt(localValue(new Date(slot.endAt)));
+                    }}
+                  >
+                    <Edit3 />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Eliminar intervalo"
+                    onClick={() =>
+                      setSlots((current) =>
+                        current.filter((candidate) => candidate.id !== slot.id),
+                      )
+                    }
+                  >
+                    <Trash2 />
+                  </Button>
+                </span>
               </article>
             ))
           ) : (

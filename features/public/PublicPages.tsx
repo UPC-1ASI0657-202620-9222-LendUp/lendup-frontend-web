@@ -5,22 +5,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import {
-  ArrowRight,
-  BadgeCheck,
-  CheckCircle2,
-  FileCheck2,
-  Search,
-  ShieldCheck,
-  Sparkles,
-  UsersRound,
-} from 'lucide-react';
+import { FileCheck2, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  ListingCard,
-  PageHeader,
-  StatusBadge,
-} from '@/components/lendup/shared';
+import { PageHeader, StatusBadge } from '@/components/lendup/shared';
+import { verificationService } from '@/services/domain-services';
 import { useDemo } from '@/stores/demo-store';
 
 export function PublicHeader() {
@@ -38,156 +26,6 @@ export function PublicHeader() {
         <Button render={<Link to="/register" />}>Crear cuenta</Button>
       </nav>
     </header>
-  );
-}
-
-export function LandingPage() {
-  const { state } = useDemo();
-  const featured = state.listings
-    .filter((item) => item.status === 'ACTIVE')
-    .slice(0, 3);
-  return (
-    <div className="public-page">
-      <PublicHeader />
-      <main>
-        <section className="hero">
-          <div className="hero-copy">
-            <span className="pill">
-              <Sparkles />
-              Comunidad universitaria verificada
-            </span>
-            <h1>Lo que necesitas puede estar a unos pasos.</h1>
-            <p>
-              Presta lo que no usas. Consigue lo que necesitas, con condiciones
-              claras, evidencia y respaldo.
-            </p>
-            <div className="hero-actions">
-              <Button size="lg" render={<Link to="/login" />}>
-                Explorar objetos <ArrowRight />
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                render={<Link to="/register" />}
-              >
-                Crear cuenta
-              </Button>
-            </div>
-            <div className="hero-trust">
-              <span>
-                <CheckCircle2 />
-                Perfiles verificados
-              </span>
-              <span>
-                <ShieldCheck />
-                Garantías claras
-              </span>
-            </div>
-          </div>
-          <div className="hero-card">
-            <div className="hero-card-top">
-              <span className="eyebrow">Disponible cerca de ti</span>
-              <span className="live-dot">Ahora</span>
-            </div>
-            <img
-              src={featured[0]?.image}
-              alt={featured[0]?.title ?? 'Objeto disponible'}
-            />
-            <div className="hero-card-body">
-              <div>
-                <h3>{featured[0]?.title}</h3>
-                <p>
-                  {featured[0]?.university} · {featured[0]?.campus}
-                </p>
-              </div>
-              <strong>
-                S/ {featured[0]?.dailyRate} <small>/ día</small>
-              </strong>
-            </div>
-          </div>
-        </section>
-        <section className="how">
-          <span className="eyebrow">Simple de principio a fin</span>
-          <h2>Una forma más segura de compartir</h2>
-          <div className="steps">
-            <article>
-              <span>01</span>
-              <Search />
-              <h3>Encuentra o publica</h3>
-              <p>
-                Explora objetos de estudiantes verificados o publica lo que ya
-                no usas a diario.
-              </p>
-            </article>
-            <article>
-              <span>02</span>
-              <FileCheck2 />
-              <h3>Reserva con claridad</h3>
-              <p>
-                Fechas, tarifa, garantía y condiciones quedan confirmadas antes
-                de la entrega.
-              </p>
-            </article>
-            <article>
-              <span>03</span>
-              <ShieldCheck />
-              <h3>Entrega con respaldo</h3>
-              <p>
-                Registra evidencias, confirma la recepción y devuelve con
-                trazabilidad completa.
-              </p>
-            </article>
-          </div>
-        </section>
-        <section className="featured">
-          <PageHeader
-            eyebrow="Explora la comunidad"
-            title="Objetos destacados"
-            action={
-              <Button variant="outline" render={<Link to="/login" />}>
-                Ver todos <ArrowRight />
-              </Button>
-            }
-          />
-          <div className="listing-grid">
-            {featured.map((item) => (
-              <ListingCard
-                key={item.id}
-                listing={item}
-                owner={state.users.find((user) => user.id === item.ownerId)}
-              />
-            ))}
-          </div>
-        </section>
-        <section className="benefits">
-          <article>
-            <UsersRound />
-            <h3>Tu comunidad</h3>
-            <p>Perfiles vinculados a universidades y campus reales.</p>
-          </article>
-          <article>
-            <BadgeCheck />
-            <h3>Reputación útil</h3>
-            <p>Valoraciones ligadas a préstamos completados.</p>
-          </article>
-          <article>
-            <ShieldCheck />
-            <h3>Más respaldo</h3>
-            <p>Evidencias y garantías separadas de la tarifa.</p>
-          </article>
-        </section>
-      </main>
-      <footer className="public-footer">
-        <div className="brand">
-          <span className="brand-mark">
-            <ShieldCheck />
-          </span>
-          LendUp
-        </div>
-        <p>Hecho para compartir mejor dentro de tu comunidad universitaria.</p>
-        <Link to="/terms">Términos y condiciones</Link>
-      </footer>
-    </div>
   );
 }
 
@@ -245,10 +83,6 @@ export function LoginPage() {
           />
         </Field>
         <div className="form-row">
-          <label className="check-row">
-            <input type="checkbox" />
-            Recordarme
-          </label>
           <span className="muted">Demo: usa lendup123</span>
         </div>
         <Button type="submit" size="lg" disabled={isSubmitting}>
@@ -351,8 +185,9 @@ export function RegisterPage() {
             {isSubmitting ? 'Creando cuenta…' : 'Crear cuenta'}
           </Button>
           <p className="auth-switch">
-            Al continuar aceptas los <Link to="/terms">términos de LendUp</Link>
-            .
+            Podrás revisar y aceptar los{' '}
+            <Link to="/terms">términos de LendUp</Link> después de verificar tu
+            correo.
           </p>
         </div>
       </form>
@@ -362,8 +197,8 @@ export function RegisterPage() {
 
 export function VerifyEmailPage() {
   const navigate = useNavigate();
-  const { state, verifyCurrentUser } = useDemo();
-  const [resent, setResent] = useState(false);
+  const { state, verifyCurrentUser, setVerificationStatus } = useDemo();
+  const [message, setMessage] = useState('');
   const user = state.users.find(
     (candidate) => candidate.id === state.currentUserId,
   );
@@ -382,9 +217,15 @@ export function VerifyEmailPage() {
           Abre el enlace desde tu correo institucional. Puede tardar un par de
           minutos.
         </p>
-        {resent && (
-          <output className="success-text">
-            Correo reenviado correctamente.
+        {message && (
+          <output
+            className={
+              user?.verificationStatus === 'ERROR'
+                ? 'field-error'
+                : 'success-text'
+            }
+          >
+            {message}
           </output>
         )}
         <Button
@@ -395,8 +236,26 @@ export function VerifyEmailPage() {
         >
           Simular verificación completada
         </Button>
-        <Button type="button" variant="ghost" onClick={() => setResent(true)}>
-          Reenviar correo
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={user?.verificationStatus === 'SENDING'}
+          onClick={async () => {
+            setVerificationStatus('SENDING');
+            setMessage('');
+            try {
+              const result = await verificationService.resend();
+              setVerificationStatus(result.status);
+              setMessage('Correo reenviado correctamente.');
+            } catch {
+              setVerificationStatus('ERROR');
+              setMessage('No se pudo reenviar el correo. Intenta nuevamente.');
+            }
+          }}
+        >
+          {user?.verificationStatus === 'SENDING'
+            ? 'Reenviando…'
+            : 'Reenviar correo'}
         </Button>
       </div>
     </AuthFrame>
@@ -450,14 +309,21 @@ export function TermsPage() {
         </label>
         <Button
           size="lg"
-          disabled={!accepted}
+          disabled={!accepted || !state.authenticated}
           onClick={() => {
-            acceptTerms();
-            navigate(state.authenticated ? '/app' : '/login');
+            if (acceptTerms()) navigate('/app');
           }}
         >
-          Aceptar y continuar
+          {state.authenticated
+            ? 'Aceptar y continuar'
+            : 'Inicia sesión para aceptar'}
         </Button>
+        {!state.authenticated && (
+          <p className="muted">
+            Puedes leer los términos públicamente, pero su aceptación requiere
+            una sesión iniciada.
+          </p>
+        )}
       </main>
     </div>
   );

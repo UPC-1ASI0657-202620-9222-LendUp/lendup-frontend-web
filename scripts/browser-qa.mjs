@@ -64,6 +64,12 @@ const routeCheck = async (path, expected = path) => {
 
 await page.goto(baseURL, { waitUntil: 'networkidle' });
 await page.evaluate(() => localStorage.clear());
+await page.goto(baseURL, { waitUntil: 'networkidle' });
+record(
+  'root redirige a login sin sesión',
+  new URL(page.url()).pathname === '/login',
+  page.url(),
+);
 await page.goto(`${baseURL}/app`, { waitUntil: 'networkidle' });
 record(
   'guard privado sin sesión',
@@ -77,6 +83,21 @@ await page.getByLabel('Contraseña').fill('lendup123');
 await page.getByRole('button', { name: 'Iniciar sesión' }).click();
 await page.waitForURL('**/app');
 record('login válido', new URL(page.url()).pathname === '/app');
+
+await page.goto(`${baseURL}/my-items/l1/edit`, { waitUntil: 'networkidle' });
+record(
+  'guard de ownership por URL directa',
+  new URL(page.url()).pathname === '/404',
+  page.url(),
+);
+await page.goto(`${baseURL}/loans/new?delivery=rs1`, {
+  waitUntil: 'networkidle',
+});
+record(
+  'guard de delivery exclusivo del lender',
+  new URL(page.url()).pathname === '/404',
+  page.url(),
+);
 
 const studentRoutes = [
   '/app',
@@ -117,7 +138,36 @@ await demoSelect.selectOption('admin');
 await page.waitForURL('**/admin/incidents');
 await routeCheck('/admin/incidents');
 await routeCheck('/admin/incidents/INC-1042');
+await page.goto(`${baseURL}/loans/ln1`, { waitUntil: 'networkidle' });
+record(
+  'guard de loan para usuario unrelated',
+  new URL(page.url()).pathname === '/app',
+  page.url(),
+);
+await page.goto(`${baseURL}/reservations/rs1`, { waitUntil: 'networkidle' });
+record(
+  'guard de reservation para usuario unrelated',
+  new URL(page.url()).pathname === '/app',
+  page.url(),
+);
+await page.goto(`${baseURL}/incidents/INC-1042`, { waitUntil: 'networkidle' });
+record(
+  'admin usa exclusivamente la ruta administrativa de incident',
+  new URL(page.url()).pathname === '/app',
+  page.url(),
+);
+await page.goto(`${baseURL}/admin/incidents`, { waitUntil: 'networkidle' });
 
+const responsiveRoutes = [
+  { path: '/admin/incidents', user: 'admin' },
+  { path: '/calendar', user: 'alexandra' },
+  { path: '/transactions', user: 'alexandra' },
+  { path: '/my-items/new', user: 'alexandra' },
+  { path: '/reservations/rs1', user: 'alexandra' },
+  { path: '/reservations/rs1/checkout', user: 'alexandra' },
+  { path: '/loans/ln1', user: 'alexandra' },
+  { path: '/incidents/INC-1042', user: 'alexandra' },
+];
 for (const viewport of [
   { name: 'desktop', width: 1440, height: 1000 },
   { name: 'tablet', width: 820, height: 1180 },
@@ -127,8 +177,9 @@ for (const viewport of [
     width: viewport.width,
     height: viewport.height,
   });
-  for (const path of ['/admin/incidents', '/calendar', '/transactions']) {
-    await page.goto(`${baseURL}${path}`, { waitUntil: 'networkidle' });
+  for (const route of responsiveRoutes) {
+    await page.getByLabel('Ver como').selectOption(route.user, { force: true });
+    await page.goto(`${baseURL}${route.path}`, { waitUntil: 'networkidle' });
     const layout = await page.evaluate(() => {
       const overflow =
         document.documentElement.scrollWidth -
@@ -156,22 +207,31 @@ for (const viewport of [
       });
       return {
         overflow,
-        safe: overflow <= 2 || (unmanaged.length === 0 && scrollRegionsAreSafe),
+        safe: unmanaged.length === 0 && scrollRegionsAreSafe,
         culprits: wideElements
           .slice(0, 8)
           .map(
             (element) =>
-              `${element.tagName.toLowerCase()}.${element.className || ''} (${Math.round(element.getBoundingClientRect().width)}px)`,
+              `${element.tagName.toLowerCase()}.${element.className || ''} (${Math.round(element.getBoundingClientRect().left)}..${Math.round(element.getBoundingClientRect().right)} / ${Math.round(element.getBoundingClientRect().width)}px)`,
           ),
       };
     });
     record(
-      `${viewport.name} ${path}`,
+      `${viewport.name} ${route.path}`,
       layout.safe,
       `overflow ${layout.overflow}px${layout.culprits.length ? ` · ${layout.culprits.join(', ')}` : ''}`,
     );
   }
 }
+
+await page.setViewportSize({ width: 390, height: 844 });
+await page.getByLabel('Ver como').selectOption('alexandra', { force: true });
+await page.goto(`${baseURL}/app`, { waitUntil: 'networkidle' });
+await page.getByRole('button', { name: 'Menú' }).click();
+record(
+  'drawer móvil contiene navegación secundaria',
+  await page.getByRole('link', { name: 'Transacciones' }).isVisible(),
+);
 
 record(
   'sin errores de consola',

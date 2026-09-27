@@ -6,7 +6,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from '@/components/lendup/AppShell';
 import { DemoProvider } from '@/stores/demo-store';
 import {
-  LandingPage,
   LoginPage,
   RegisterPage,
   TermsPage,
@@ -43,11 +42,16 @@ import {
 } from '@/features/incidents/IncidentPages';
 import { EmptyState } from '@/components/lendup/shared';
 import { ShieldCheck } from 'lucide-react';
-import { WebMcpTools } from '@/features/app/WebMcpTools';
 import {
   AdminRoute,
+  CheckoutGuard,
+  LoanAccessGuard,
+  OperationAccessGuard,
+  OwnershipGuard,
   ProtectedRoute,
   PublicOnlyRoute,
+  RootRedirect,
+  StudentRoute,
 } from '@/features/app/RouteGuards';
 
 const queryClient = new QueryClient({
@@ -71,9 +75,8 @@ export function LendUpApp() {
     <QueryClientProvider client={queryClient}>
       <DemoProvider>
         <BrowserRouter>
-          <WebMcpTools />
           <Routes>
-            <Route path="/" element={<LandingPage />} />
+            <Route path="/" element={<RootRedirect />} />
             <Route element={<PublicOnlyRoute />}>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
@@ -83,35 +86,67 @@ export function LendUpApp() {
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>
                 <Route path="/app" element={<DashboardPage />} />
-                <Route path="/explore" element={<ExplorePage />} />
-                <Route path="/objects/:id" element={<ObjectDetailPage />} />
-                <Route path="/my-items" element={<MyItemsPage />} />
-                <Route path="/my-items/new" element={<ListingFormPage />} />
-                <Route
-                  path="/my-items/:id/edit"
-                  element={<ListingFormPage edit />}
-                />
-                <Route
-                  path="/my-items/:id/availability"
-                  element={<AvailabilityPage />}
-                />
-                <Route path="/requests" element={<RequestsPage />} />
-                <Route path="/reservations" element={<ReservationsPage />} />
-                <Route
-                  path="/reservations/:id"
-                  element={<ReservationDetailPage />}
-                />
-                <Route
-                  path="/reservations/:id/checkout"
-                  element={<CheckoutPage />}
-                />
-                <Route path="/loans" element={<LoansPage />} />
-                <Route path="/loans/:id" element={<LoanDetailPage />} />
-                <Route path="/incidents" element={<IncidentsPage />} />
-                <Route path="/incidents/:id" element={<IncidentDetailPage />} />
-                <Route path="/calendar" element={<CalendarPage />} />
+                <Route element={<StudentRoute />}>
+                  <Route path="/explore" element={<ExplorePage />} />
+                  <Route path="/objects/:id" element={<ObjectDetailPage />} />
+                  <Route path="/my-items" element={<MyItemsPage />} />
+                  <Route path="/my-items/new" element={<ListingFormPage />} />
+                  <Route
+                    path="/my-items/:id/edit"
+                    element={
+                      <OwnershipGuard>
+                        <ListingFormPage edit />
+                      </OwnershipGuard>
+                    }
+                  />
+                  <Route
+                    path="/my-items/:id/availability"
+                    element={
+                      <OwnershipGuard>
+                        <AvailabilityPage />
+                      </OwnershipGuard>
+                    }
+                  />
+                  <Route path="/requests" element={<RequestsPage />} />
+                  <Route path="/reservations" element={<ReservationsPage />} />
+                  <Route
+                    path="/reservations/:id"
+                    element={
+                      <OperationAccessGuard kind="reservation">
+                        <ReservationDetailPage />
+                      </OperationAccessGuard>
+                    }
+                  />
+                  <Route
+                    path="/reservations/:id/checkout"
+                    element={
+                      <CheckoutGuard>
+                        <CheckoutPage />
+                      </CheckoutGuard>
+                    }
+                  />
+                  <Route path="/loans" element={<LoansPage />} />
+                  <Route
+                    path="/loans/:id"
+                    element={
+                      <LoanAccessGuard>
+                        <LoanDetailPage />
+                      </LoanAccessGuard>
+                    }
+                  />
+                  <Route path="/incidents" element={<IncidentsPage />} />
+                  <Route
+                    path="/incidents/:id"
+                    element={
+                      <OperationAccessGuard kind="incident">
+                        <IncidentDetailPage />
+                      </OperationAccessGuard>
+                    }
+                  />
+                  <Route path="/calendar" element={<CalendarPage />} />
+                  <Route path="/transactions" element={<TransactionsPage />} />
+                </Route>
                 <Route path="/notifications" element={<NotificationsPage />} />
-                <Route path="/transactions" element={<TransactionsPage />} />
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/users/:id" element={<PublicProfilePage />} />
                 <Route element={<AdminRoute />}>

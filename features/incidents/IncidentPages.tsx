@@ -18,6 +18,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
+import { useQuery } from '@tanstack/react-query';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,7 @@ import {
   ErrorState,
   EvidenceUploader,
   FinancialCard,
+  LoadingSkeleton,
   PageHeader,
   StatusBadge,
   Timeline,
@@ -33,7 +35,10 @@ import {
   money,
   shortDate,
 } from '@/components/lendup/shared';
-import { evidenceAnalysisService } from '@/services/domain-services';
+import {
+  evidenceAnalysisService,
+  incidentService,
+} from '@/services/domain-services';
 import { useDemo } from '@/stores/demo-store';
 import type { Evidence, IncidentDecision, IncidentType } from '@/types/domain';
 
@@ -130,7 +135,7 @@ export function IncidentsPage() {
             </label>
             <div className="wide">
               <EvidenceUploader
-                stage="INCIDENT"
+                phase="INCIDENT"
                 author={current.name}
                 authorId={current.id}
                 value={evidence}
@@ -157,7 +162,7 @@ export function IncidentsPage() {
                   description,
                   evidence,
                 );
-                navigate(`/incidents/${incidentId}`);
+                if (incidentId) navigate(`/incidents/${incidentId}`);
               }}
             >
               Registrar incidencia
@@ -208,7 +213,9 @@ export function IncidentsPage() {
 
 export function IncidentDetailPage() {
   const { id } = useParams();
-  const { state } = useDemo();
+  const { state, submitCounterpartyStatement } = useDemo();
+  const [statement, setStatement] = useState('');
+  const [statementSaved, setStatementSaved] = useState(false);
   const incident = state.incidents.find((item) => item.id === id);
   if (!incident)
     return (
@@ -227,7 +234,7 @@ export function IncidentDetailPage() {
         description={`Préstamo ${loan.id.toUpperCase()}`}
         action={<StatusBadge status={incident.status} />}
       />
-      {incident.status !== 'RESOLVED' && (
+      {incident.status === 'UNDER_REVIEW' && (
         <div className="warning-box strong">
           <ShieldAlert />
           <p>
@@ -326,6 +333,36 @@ export function IncidentDetailPage() {
           ]}
         />
       </section>
+      {incident.status !== 'RESOLVED' &&
+        incident.reportedBy !== state.currentUserId &&
+        !incident.counterpartyStatement && (
+          <section className="panel">
+            <span className="eyebrow">Tu declaración</span>
+            <h2>Aporta la versión de la contraparte</h2>
+            <label className="field">
+              <span>Declaración</span>
+              <textarea
+                value={statement}
+                onChange={(event) => setStatement(event.target.value)}
+                placeholder="Describe los hechos desde tu perspectiva."
+              />
+            </label>
+            <Button
+              type="button"
+              disabled={statement.trim().length < 10}
+              onClick={() =>
+                setStatementSaved(
+                  submitCounterpartyStatement(incident.id, statement),
+                )
+              }
+            >
+              Guardar declaración
+            </Button>
+            {statementSaved && (
+              <output className="success-text">Declaración guardada.</output>
+            )}
+          </section>
+        )}
     </>
   );
 }
@@ -337,9 +374,18 @@ export function AdminIncidentsPage() {
   const [date, setDate] = useState('');
   const [loan, setLoan] = useState('');
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
+  const {
+    data: loadedIncidents = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['admin-incidents', state.incidents],
+    queryFn: () => incidentService.list(state),
+  });
   const incidents = useMemo(
     () =>
-      state.incidents
+      loadedIncidents
         .filter(
           (item) =>
             (!status || item.status === status) &&
@@ -352,7 +398,7 @@ export function AdminIncidentsPage() {
             ? a.createdAt.localeCompare(b.createdAt)
             : b.createdAt.localeCompare(a.createdAt),
         ),
-    [state.incidents, status, type, date, loan, order],
+    [loadedIncidents, status, type, date, loan, order],
   );
   const clear = () => {
     setStatus('');
@@ -361,6 +407,15 @@ export function AdminIncidentsPage() {
     setLoan('');
     setOrder('desc');
   };
+  if (isLoading) return <LoadingSkeleton cards={3} />;
+  if (isError)
+    return (
+      <ErrorState
+        title="No pudimos cargar las incidencias"
+        description="Reintenta la consulta administrativa."
+        onRetry={() => refetch()}
+      />
+    );
   return (
     <>
       <PageHeader
@@ -507,10 +562,29 @@ type ResolutionValues = {
 };
 export function AdminIncidentDetailPage() {
   const { id } = useParams();
-  const { state, resolveIncident, saveAnalysis } = useDemo();
+  const {
+    state,
+    resolveIncident,
+    saveAnalysis,
+    startIncidentReview,
+    addIncidentAdminNote,
+  } = useDemo();
+  const [adminNote, setAdminNote] = useState('');
   const navigate = useNavigate();
   const incident = state.incidents.find((item) => item.id === id);
-  const schema = resolutionSchema(incident?.guaranteeAmount ?? 0);
+  const alreadyDecided = state.incidents
+    .filter(
+      (item) =>
+        item.loanId === incident?.loanId &&
+        item.id !== incident?.id &&
+        item.status === 'RESOLVED',
+    )
+    .reduce((sum, item) => sum + (item.resolution?.amount ?? 0), 0);
+  const remainingGuarantee = Math.max(
+    0,
+    (incident?.guaranteeAmount ?? 0) - alreadyDecided,
+  );
+  const schema = resolutionSchema(remainingGuarantee);
   const {
     register,
     handleSubmit,
@@ -545,7 +619,7 @@ export function AdminIncidentDetailPage() {
   const submit = (values: ResolutionValues) => {
     const amount =
       values.decision === 'TOTAL'
-        ? incident.guaranteeAmount
+        ? remainingGuarantee
         : values.decision === 'NO_IMPACT'
           ? 0
           : values.amount;
@@ -563,7 +637,19 @@ export function AdminIncidentDetailPage() {
         eyebrow={`Administración · ${incident.id}`}
         title={listing.title}
         description={`Revisión del préstamo ${loan.id.toUpperCase()}`}
-        action={<StatusBadge status={incident.status} />}
+        action={
+          <div className="header-actions">
+            <StatusBadge status={incident.status} />
+            {incident.status === 'OPEN' && (
+              <Button
+                type="button"
+                onClick={() => startIncidentReview(incident.id)}
+              >
+                Iniciar revisión
+              </Button>
+            )}
+          </div>
+        }
       />
       <div className="admin-summary">
         <section className="panel">
@@ -630,12 +716,12 @@ export function AdminIncidentDetailPage() {
       <div className="evidence-comparison">
         <AdminEvidence
           title="Evidencias iniciales"
-          items={loan.evidence.filter((item) => item.stage === 'BEFORE')}
+          items={loan.evidence.filter((item) => item.phase === 'INITIAL')}
         />
         <AdminEvidence
           title="Evidencias finales e incidencia"
           items={[
-            ...loan.evidence.filter((item) => item.stage === 'AFTER'),
+            ...loan.evidence.filter((item) => item.phase === 'FINAL'),
             ...incident.evidence,
           ]}
         />
@@ -667,7 +753,51 @@ export function AdminIncidentDetailPage() {
         <span className="eyebrow">Timeline del préstamo</span>
         <Timeline items={loan.timeline} />
       </section>
-      {incident.status !== 'RESOLVED' ? (
+      {incident.status !== 'RESOLVED' && (
+        <section className="panel">
+          <span className="eyebrow">Notas administrativas</span>
+          <h2>Seguimiento de revisión</h2>
+          {incident.adminNotes.length ? (
+            <div className="history-list">
+              {incident.adminNotes.map((note) => (
+                <article key={note.id}>
+                  <strong>{note.text}</strong>
+                  <span>{shortDate(note.createdAt)}</span>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No hay notas administrativas.</p>
+          )}
+          {incident.status === 'UNDER_REVIEW' ? (
+            <>
+              <label className="field">
+                <span>Nueva nota</span>
+                <textarea
+                  value={adminNote}
+                  onChange={(event) => setAdminNote(event.target.value)}
+                />
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={adminNote.trim().length < 3}
+                onClick={() => {
+                  if (addIncidentAdminNote(incident.id, adminNote))
+                    setAdminNote('');
+                }}
+              >
+                Agregar nota
+              </Button>
+            </>
+          ) : (
+            <p className="muted">
+              Inicia la revisión para registrar notas administrativas.
+            </p>
+          )}
+        </section>
+      )}
+      {incident.status === 'UNDER_REVIEW' ? (
         <form className="panel resolution-form" onSubmit={handleSubmit(submit)}>
           <div className="section-heading">
             <div>
@@ -716,7 +846,7 @@ export function AdminIncidentDetailPage() {
           {decision === 'PARTIAL' && (
             <label className="field">
               <span>
-                Monto de afectación (máximo {money(incident.guaranteeAmount)})
+                Monto de afectación (máximo {money(remainingGuarantee)})
               </span>
               <input
                 type="number"
@@ -753,11 +883,19 @@ export function AdminIncidentDetailPage() {
             </Button>
           </div>
         </form>
-      ) : (
+      ) : incident.status === 'RESOLVED' ? (
         <section className="panel">
           <CheckCircle2 />
           <h2>Incidencia resuelta</h2>
           <p>{incident.resolution?.justification}</p>
+        </section>
+      ) : (
+        <section className="panel">
+          <ShieldAlert />
+          <h2>La revisión todavía no ha comenzado</h2>
+          <p>
+            Inicia la revisión antes de registrar notas o resolver la garantía.
+          </p>
         </section>
       )}
     </>
@@ -778,7 +916,7 @@ function AdminEvidence({ title, items }: { title: string; items: Evidence[] }) {
             )}
             <strong>{item.label}</strong>
             <span>
-              {item.author} · {shortDate(item.date)}
+              {item.author} · {shortDate(item.createdAt)}
             </span>
           </div>
         ))

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Link,
   useNavigate,
@@ -47,12 +47,17 @@ import {
   UserChip,
   money,
   shortDate,
+  statusLabels,
 } from '@/components/lendup/shared';
 import {
   evidenceAnalysisService,
   paymentService,
 } from '@/services/domain-services';
-import { economicBreakdown, extensionCost } from '@/lib/business-rules';
+import {
+  canViewCounterpartyPhone,
+  economicBreakdown,
+  extensionCost,
+} from '@/lib/business-rules';
 import { useDemo } from '@/stores/demo-store';
 import type { Evidence } from '@/types/domain';
 
@@ -359,13 +364,12 @@ export function ReservationDetailPage() {
             value={counterpart?.rating ?? 0}
             count={counterpart?.ratingCount}
           />
-          {reservation.status !== 'CANCELLED' &&
-            reservation.status !== 'COMPLETED' && (
-              <div className="contact-card">
-                <strong>Coordinación de entrega</strong>
-                <span>Teléfono: {counterpart?.phone}</span>
-              </div>
-            )}
+          {canViewCounterpartyPhone(reservation, state.currentUserId) && (
+            <div className="contact-card">
+              <strong>Coordinación de entrega</strong>
+              <span>Teléfono: {counterpart?.phone}</span>
+            </div>
+          )}
         </section>
         <FinancialCard
           type="payment"
@@ -496,7 +500,8 @@ export function CheckoutPage() {
     queryKey: ['payment-methods'],
     queryFn: () => paymentService.getAvailablePaymentMethods(),
   });
-  const [method, setMethod] = useState('Yape');
+  const [paymentMethod, setPaymentMethod] = useState('yape');
+  const [guaranteeMethod, setGuaranteeMethod] = useState('plin');
   const [processing, setProcessing] = useState(false);
   if (!reservation)
     return (
@@ -518,32 +523,66 @@ export function CheckoutPage() {
       />
       <div className="checkout-layout">
         <section className="panel">
-          <h2>Medio de pago</h2>
+          <h2>Medio para la tarifa</h2>
           {isLoading ? (
             <LoadingSkeleton cards={1} />
           ) : isError ? (
             <ErrorState onRetry={() => refetch()} />
+          ) : methods.length === 0 ? (
+            <EmptyState
+              title="No hay medios disponibles"
+              description="El proveedor de pagos no devolvió opciones. Intenta nuevamente más tarde."
+            />
           ) : (
             <div className="payment-methods">
-              {methods.map((label) => (
+              {methods.map((method) => (
                 <label
-                  key={label}
-                  className={method === label ? 'selected' : ''}
+                  key={method.id}
+                  className={paymentMethod === method.id ? 'selected' : ''}
                 >
                   <input
                     type="radio"
-                    checked={method === label}
-                    onChange={() => setMethod(label)}
+                    checked={paymentMethod === method.id}
+                    onChange={() => setPaymentMethod(method.id)}
                   />
                   <WalletCards />
                   <span>
-                    <strong>{label}</strong>
+                    <strong>{method.label}</strong>
                     <small>Método demo</small>
                   </span>
                 </label>
               ))}
             </div>
           )}
+          {reservation.snapshot.guaranteeAmount > 0 &&
+            !isLoading &&
+            !isError && (
+              <>
+                <h2>Medio para la garantía</h2>
+                <div className="payment-methods">
+                  {methods.map((method) => (
+                    <label
+                      key={`guarantee-${method.id}`}
+                      className={
+                        guaranteeMethod === method.id ? 'selected' : ''
+                      }
+                    >
+                      <input
+                        type="radio"
+                        name="guarantee-method"
+                        checked={guaranteeMethod === method.id}
+                        onChange={() => setGuaranteeMethod(method.id)}
+                      />
+                      <WalletCards />
+                      <span>
+                        <strong>{method.label}</strong>
+                        <small>Puede ser distinto al pago de tarifa</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
           <div className="info-banner">
             <ShieldCheck />
             <p>
@@ -573,12 +612,19 @@ export function CheckoutPage() {
           </div>
           <Button
             size="lg"
-            disabled={processing || isLoading}
+            disabled={processing || isLoading || methods.length === 0}
             onClick={() => {
               setProcessing(true);
               setTimeout(() => {
-                payReservation(reservation.id, method);
-                holdGuarantee(reservation.id);
+                const rentalMethod =
+                  methods.find((method) => method.id === paymentMethod)
+                    ?.label ?? paymentMethod;
+                const holdMethod =
+                  methods.find((method) => method.id === guaranteeMethod)
+                    ?.label ?? guaranteeMethod;
+                payReservation(reservation.id, rentalMethod);
+                if (reservation.snapshot.guaranteeAmount > 0)
+                  holdGuarantee(reservation.id, holdMethod);
                 navigate(`/reservations/${reservation.id}`);
               }, 500);
             }}
@@ -605,7 +651,10 @@ export function LoansPage() {
     tab === 'UPCOMING'
       ? ['PENDING_DELIVERY', 'PENDING_RECEIPT'].includes(item.status)
       : item.status === tab ||
-        (tab === 'ACTIVE' && item.status === 'RETURN_RECORDED'),
+        (tab === 'ACTIVE' &&
+          ['RETURN_RECORDED', 'RETURN_CONFIRMED_PENDING_INCIDENT'].includes(
+            item.status,
+          )),
   );
   return (
     <>
@@ -653,9 +702,11 @@ export function LoansPage() {
                   ? 'Registrar devolución'
                   : item.status === 'RETURN_RECORDED'
                     ? 'Confirmar devolución'
-                    : item.status === 'OVERDUE'
-                      ? 'Coordinar devolución'
-                      : 'Calificar experiencia';
+                    : item.status === 'RETURN_CONFIRMED_PENDING_INCIDENT'
+                      ? 'Esperar resolución de incidencia'
+                      : item.status === 'OVERDUE'
+                        ? 'Coordinar devolución'
+                        : 'Calificar experiencia';
             return (
               <article className="reservation-card" key={item.id}>
                 <img src={listing.image} alt={listing.title} />
@@ -725,12 +776,14 @@ export function LoanDetailPage() {
     confirmReceipt,
     requestExtension,
     respondExtension,
+    payExtension,
     proposeReschedule,
     respondReschedule,
     recordReturn,
     confirmReturn,
     rateLoan,
     saveAnalysis,
+    mockRefreshDerivedStatuses,
   } = useDemo();
   const navigate = useNavigate();
   const deliveryId = params.get('delivery');
@@ -738,12 +791,32 @@ export function LoanDetailPage() {
   const item = state.loans.find((candidate) => candidate.id === id);
   const [deliveryEvidence, setDeliveryEvidence] = useState<Evidence[]>([]);
   const [dialog, setDialog] = useState<LoanDialog>(null);
-  const [newDate, setNewDate] = useState('2026-10-15T18:00');
+  const currentDue = item?.currentReturnAt ?? new Date().toISOString();
+  const suggestedDue = new Date(
+    Math.max(new Date(currentDue).getTime(), Date.now()) + 86_400_000,
+  );
+  const [newDate, setNewDate] = useState(
+    new Date(suggestedDue.getTime() - suggestedDue.getTimezoneOffset() * 60_000)
+      .toISOString()
+      .slice(0, 16),
+  );
   const [notes, setNotes] = useState('');
   const [returnEvidence, setReturnEvidence] = useState<Evidence[]>([]);
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
   const [message, setMessage] = useState('');
+  const [extensionPaymentMethod, setExtensionPaymentMethod] = useState('yape');
+  const {
+    data: extensionPaymentMethods = [],
+    isLoading: extensionMethodsLoading,
+    isError: extensionMethodsError,
+  } = useQuery({
+    queryKey: ['payment-methods', 'extension'],
+    queryFn: () => paymentService.getAvailablePaymentMethods(),
+  });
+  useEffect(() => {
+    mockRefreshDerivedStatuses();
+  }, [mockRefreshDerivedStatuses]);
   if (id === 'new' && reservation) {
     const listing = state.listings.find(
       (candidate) => candidate.id === reservation.listingId,
@@ -770,7 +843,7 @@ export function LoanDetailPage() {
         </div>
         <section className="panel">
           <EvidenceUploader
-            stage="BEFORE"
+            phase="INITIAL"
             author={current.name}
             authorId={current.id}
             value={deliveryEvidence}
@@ -812,6 +885,9 @@ export function LoanDetailPage() {
   );
   const pendingExtension = item.extensions.findLast(
     (extension) => extension.status === 'PENDING',
+  );
+  const payableExtension = item.extensions.findLast(
+    (extension) => extension.status === 'PAYMENT_PENDING',
   );
   const pendingReschedule = item.reschedules.findLast(
     (reschedule) => reschedule.status === 'PENDING',
@@ -863,7 +939,7 @@ export function LoanDetailPage() {
         <section className="panel">
           <span className="eyebrow">Contraparte</span>
           <UserChip user={counterpart} detail />
-          {item.status !== 'COMPLETED' && (
+          {canViewCounterpartyPhone(item, state.currentUserId) && (
             <div className="contact-card">
               <strong>Coordinación de entrega</strong>
               <span>Teléfono: {counterpart?.phone}</span>
@@ -920,6 +996,22 @@ export function LoanDetailPage() {
                   {shortDate(extension.proposedReturnAt)}
                 </span>
                 <span>Costo adicional: {money(extension.additionalCost)}</span>
+                <span>Solicitada: {shortDate(extension.requestedAt)}</span>
+                {extension.respondedAt && (
+                  <span>Respondida: {shortDate(extension.respondedAt)}</span>
+                )}
+                {extension.paymentStatus && (
+                  <span>
+                    Pago:{' '}
+                    {statusLabels[extension.paymentStatus] ??
+                      extension.paymentStatus}
+                  </span>
+                )}
+                {extension.resultingReturnAt && (
+                  <span>
+                    Fecha resultante: {shortDate(extension.resultingReturnAt)}
+                  </span>
+                )}
                 <StatusBadge status={extension.status} />
               </article>
             ))}
@@ -931,6 +1023,10 @@ export function LoanDetailPage() {
                   {shortDate(reschedule.proposedReturnAt)}
                 </span>
                 <span>Costo adicional: {money(0)}</span>
+                <span>Propuesta: {shortDate(reschedule.proposedAt)}</span>
+                {reschedule.respondedAt && (
+                  <span>Respondida: {shortDate(reschedule.respondedAt)}</span>
+                )}
                 <StatusBadge status={reschedule.status} />
               </article>
             ))}
@@ -943,11 +1039,13 @@ export function LoanDetailPage() {
             Confirmar recepción
           </Button>
         )}
-        {isBorrower && item.status === 'ACTIVE' && (
+        {isBorrower && ['ACTIVE', 'OVERDUE'].includes(item.status) && (
           <>
-            <Button variant="outline" onClick={() => setDialog('extension')}>
-              Solicitar extensión
-            </Button>
+            {item.status === 'ACTIVE' && (
+              <Button variant="outline" onClick={() => setDialog('extension')}>
+                Solicitar extensión
+              </Button>
+            )}
             <Button onClick={() => setDialog('return')}>
               Registrar devolución
             </Button>
@@ -955,6 +1053,53 @@ export function LoanDetailPage() {
               Devolver antes de tiempo
             </Button>
           </>
+        )}
+        {isBorrower && payableExtension && (
+          <div className="inline-payment-action">
+            {extensionMethodsLoading ? (
+              <LoadingSkeleton cards={1} />
+            ) : extensionMethodsError ||
+              extensionPaymentMethods.length === 0 ? (
+              <span className="field-error">
+                El proveedor de pagos no está disponible.
+              </span>
+            ) : (
+              <label>
+                Medio para extensión
+                <select
+                  value={extensionPaymentMethod}
+                  onChange={(event) =>
+                    setExtensionPaymentMethod(event.target.value)
+                  }
+                >
+                  {extensionPaymentMethods.map((method) => (
+                    <option value={method.id} key={method.id}>
+                      {method.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <Button
+              disabled={
+                extensionMethodsLoading ||
+                extensionMethodsError ||
+                extensionPaymentMethods.length === 0
+              }
+              onClick={() => {
+                const selected = extensionPaymentMethods.find(
+                  (method) => method.id === extensionPaymentMethod,
+                );
+                const result = payExtension(
+                  item.id,
+                  selected?.label ?? extensionPaymentMethod,
+                );
+                setMessage(result.message);
+              }}
+            >
+              Pagar extensión · {money(payableExtension.additionalCost)}
+            </Button>
+          </div>
         )}
         {!isBorrower && item.status === 'ACTIVE' && (
           <Button variant="outline" onClick={() => setDialog('reschedule')}>
@@ -1070,8 +1215,8 @@ function EvidenceComparison({
   analysis?: ReturnType<typeof useDemo>['state']['analyses'][number];
   onAnalyze: () => void;
 }) {
-  const before = evidence.filter((item) => item.stage === 'BEFORE');
-  const after = evidence.filter((item) => item.stage === 'AFTER');
+  const before = evidence.filter((item) => item.phase === 'INITIAL');
+  const after = evidence.filter((item) => item.phase === 'FINAL');
   return (
     <section className="panel">
       <div className="section-heading">
@@ -1131,7 +1276,7 @@ function EvidenceColumn({
             )}
             <strong>{item.label}</strong>
             <span>
-              {item.author} · {shortDate(item.date)}
+              {item.author} · {shortDate(item.createdAt)}
             </span>
           </div>
         ))
@@ -1260,7 +1405,7 @@ function LoanActionDialog({
         {needsEvidence && (
           <>
             <EvidenceUploader
-              stage="AFTER"
+              phase="FINAL"
               author={currentUser.name}
               authorId={currentUser.id}
               value={evidence}
