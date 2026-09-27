@@ -1,53 +1,1332 @@
 'use client';
 
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, CalendarClock, Camera, Check, CheckCircle2, CircleDollarSign, FileCheck2, ImagePlus, MapPin, RotateCcw, ShieldAlert, ShieldCheck, Star, Upload, WalletCards, X } from 'lucide-react';
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
+import {
+  AlertTriangle,
+  ArrowRight,
+  CalendarClock,
+  Camera,
+  Check,
+  CheckCircle2,
+  CircleDollarSign,
+  FileCheck2,
+  MapPin,
+  RotateCcw,
+  ShieldAlert,
+  ShieldCheck,
+  Star,
+  WalletCards,
+  X,
+} from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { EmptyState, FinancialCard, PageHeader, Reputation, StatusBadge, Timeline, UserChip, money, shortDate } from '@/components/lendup/shared';
-import { paymentService } from '@/services/mock.service';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  EmptyState,
+  ErrorState,
+  EvidenceUploader,
+  FinancialCard,
+  LoadingSkeleton,
+  PageHeader,
+  Reputation,
+  StatusBadge,
+  Timeline,
+  UserChip,
+  money,
+  shortDate,
+} from '@/components/lendup/shared';
+import {
+  evidenceAnalysisService,
+  paymentService,
+} from '@/services/domain-services';
+import { economicBreakdown, extensionCost } from '@/lib/business-rules';
 import { useDemo } from '@/stores/demo-store';
+import type { Evidence } from '@/types/domain';
 
 export function RequestsPage() {
-  const { state, respondRequest } = useDemo(); const [mode, setMode] = useState<'received' | 'sent'>('sent'); const userId = state.currentUserId; const requests = state.requests.filter((r) => mode === 'sent' ? r.borrowerId === userId : r.lenderId === userId);
-  return <><PageHeader eyebrow="Solicitudes" title="Solicitudes de préstamo" description="Las solicitudes aún no son reservas. Una reserva aparece después de ser aceptada." /><div className="tabs-bar"><button className={mode === 'sent' ? 'active' : ''} onClick={() => setMode('sent')}>Enviadas</button><button className={mode === 'received' ? 'active' : ''} onClick={() => setMode('received')}>Recibidas</button></div>{requests.length ? <div className="operation-list">{requests.map((request) => { const listing = state.listings.find((l) => l.id === request.listingId)!; const person = state.users.find((u) => u.id === (mode === 'sent' ? request.lenderId : request.borrowerId)); return <article className="operation-card" key={request.id}><img src={listing.image} alt={listing.title} /><div className="operation-main"><div className="operation-top"><StatusBadge status={request.status} /><span>{shortDate(request.createdAt)}</span></div><h2>{listing.title}</h2><UserChip user={person} /><div className="operation-facts"><span><CalendarClock />{shortDate(request.startAt)} — {shortDate(request.endAt)}</span><span><CircleDollarSign />{money(request.snapshot.dailyRate)}/día</span><span><ShieldCheck />Garantía {money(request.snapshot.guaranteeAmount)}</span></div></div><div className="operation-actions"><Button variant="outline" render={<Link to={`/objects/${listing.id}`} />}>Ver objeto</Button>{mode === 'received' && request.status === 'PENDING' && <><Button onClick={() => respondRequest(request.id, true)}><Check />Aceptar</Button><Button variant="destructive" onClick={() => respondRequest(request.id, false)}><X />Rechazar</Button></>}{request.status === 'ACCEPTED' && <Button render={<Link to="/reservations" />}>Ver reserva <ArrowRight /></Button>}</div></article>; })}</div> : <EmptyState title={`No tienes solicitudes ${mode === 'sent' ? 'enviadas' : 'recibidas'}`} description={mode === 'sent' ? 'Explora objetos para enviar tu primera solicitud.' : 'Las nuevas solicitudes aparecerán aquí.'} action={mode === 'sent' ? 'Explorar objetos' : undefined} href="/explore" />}</>;
+  const { state, respondRequest, cancelRequest } = useDemo();
+  const [mode, setMode] = useState<'received' | 'sent'>('sent');
+  const requests = state.requests.filter((request) =>
+    mode === 'sent'
+      ? request.borrowerId === state.currentUserId
+      : request.lenderId === state.currentUserId,
+  );
+  return (
+    <>
+      <PageHeader
+        eyebrow="Solicitudes"
+        title="Solicitudes de préstamo"
+        description="Una solicitud se convierte en reserva únicamente después de ser aceptada."
+      />
+      <div className="tabs-bar" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'sent'}
+          className={mode === 'sent' ? 'active' : ''}
+          onClick={() => setMode('sent')}
+        >
+          Enviadas
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'received'}
+          className={mode === 'received' ? 'active' : ''}
+          onClick={() => setMode('received')}
+        >
+          Recibidas
+        </button>
+      </div>
+      {requests.length ? (
+        <div className="operation-list">
+          {requests.map((request) => {
+            const item = state.listings.find(
+              (listing) => listing.id === request.listingId,
+            )!;
+            const person = state.users.find(
+              (user) =>
+                user.id ===
+                (mode === 'sent' ? request.lenderId : request.borrowerId),
+            );
+            return (
+              <article className="operation-card" key={request.id}>
+                <img src={item.image} alt={item.title} />
+                <div className="operation-main">
+                  <div className="operation-top">
+                    <StatusBadge status={request.status} />
+                    <span>{shortDate(request.createdAt)}</span>
+                  </div>
+                  <h2>{item.title}</h2>
+                  <UserChip user={person} />
+                  <div className="operation-facts">
+                    <span>
+                      <CalendarClock />
+                      {shortDate(request.startAt)} — {shortDate(request.endAt)}
+                    </span>
+                    <span>
+                      <CircleDollarSign />
+                      {money(request.snapshot.dailyRate)}/día
+                    </span>
+                    <span>
+                      <ShieldCheck />
+                      Garantía {money(request.snapshot.guaranteeAmount)}
+                    </span>
+                  </div>
+                </div>
+                <div className="operation-actions">
+                  <Button
+                    variant="outline"
+                    render={<Link to={`/objects/${item.id}`} />}
+                  >
+                    Ver objeto
+                  </Button>
+                  {mode === 'received' && request.status === 'PENDING' && (
+                    <>
+                      <Button onClick={() => respondRequest(request.id, true)}>
+                        <Check />
+                        Aceptar
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={() => respondRequest(request.id, false)}
+                      >
+                        <X />
+                        Rechazar
+                      </Button>
+                    </>
+                  )}
+                  {mode === 'sent' && request.status === 'PENDING' && (
+                    <Button
+                      variant="destructive"
+                      onClick={() => cancelRequest(request.id)}
+                    >
+                      Cancelar solicitud
+                    </Button>
+                  )}
+                  {request.status === 'ACCEPTED' && (
+                    <Button render={<Link to="/reservations" />}>
+                      Ver reserva <ArrowRight />
+                    </Button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState
+          title={`No tienes solicitudes ${mode === 'sent' ? 'enviadas' : 'recibidas'}`}
+          description={
+            mode === 'sent'
+              ? 'Explora objetos para enviar tu primera solicitud.'
+              : 'Las nuevas solicitudes aparecerán aquí.'
+          }
+          action={mode === 'sent' ? 'Explorar objetos' : undefined}
+          href="/explore"
+        />
+      )}
+    </>
+  );
 }
 
 export function ReservationsPage() {
-  const { state } = useDemo(); const rows = state.reservations.filter((r) => (r.borrowerId === state.currentUserId || r.lenderId === state.currentUserId) && r.status !== 'CANCELLED');
-  return <><PageHeader eyebrow="Operaciones confirmadas" title="Reservas" description="Aquí solo aparecen solicitudes aceptadas con condiciones congeladas." />{rows.length ? <div className="reservation-grid">{rows.map((reservation) => { const listing = state.listings.find((l) => l.id === reservation.listingId)!; const isBorrower = reservation.borrowerId === state.currentUserId; return <article className="reservation-card" key={reservation.id}><img src={listing.image} alt={listing.title} /><div className="reservation-body"><div className="operation-top"><StatusBadge status={reservation.status} /><span>{isBorrower ? 'Como prestatario' : 'Como prestamista'}</span></div><h2>{listing.title}</h2><p><CalendarClock />{shortDate(reservation.snapshot.startAt)} — {shortDate(reservation.snapshot.endAt)}</p><div className="mini-status"><span><small>Pago</small><StatusBadge status={reservation.paymentStatus} /></span><span><small>Garantía</small><StatusBadge status={reservation.guaranteeStatus} /></span><span><small>Entrega</small><strong>{reservation.deliveryRecorded ? 'Registrada' : 'Pendiente'}</strong></span></div><div className="reservation-actions"><Button variant="outline" render={<Link to={`/reservations/${reservation.id}`} />}>Ver detalle</Button>{isBorrower && reservation.paymentStatus === 'PENDING' && <Button render={<Link to={`/reservations/${reservation.id}/checkout`} />}>Pagar</Button>}{!isBorrower && !reservation.deliveryRecorded && reservation.paymentStatus !== 'PENDING' && <Button render={<Link to={`/loans/${state.loans.find((l) => l.reservationId === reservation.id)?.id ?? 'new'}?delivery=${reservation.id}`} />}>Registrar entrega</Button>}</div></div></article>; })}</div> : <EmptyState title="No tienes reservas confirmadas" description="Cuando una solicitud sea aceptada, aparecerá aquí." action="Explorar objetos" href="/explore" />}</>;
+  const { state } = useDemo();
+  const rows = state.reservations.filter(
+    (reservation) =>
+      reservation.borrowerId === state.currentUserId ||
+      reservation.lenderId === state.currentUserId,
+  );
+  return (
+    <>
+      <PageHeader
+        eyebrow="Operaciones confirmadas"
+        title="Reservas"
+        description="Solicitudes aceptadas con condiciones congeladas."
+      />
+      {rows.length ? (
+        <div className="reservation-grid">
+          {rows.map((reservation) => {
+            const item = state.listings.find(
+              (listing) => listing.id === reservation.listingId,
+            )!;
+            const isBorrower = reservation.borrowerId === state.currentUserId;
+            const loan = state.loans.find(
+              (candidate) => candidate.reservationId === reservation.id,
+            );
+            return (
+              <article className="reservation-card" key={reservation.id}>
+                <img src={item.image} alt={item.title} />
+                <div className="reservation-body">
+                  <div className="operation-top">
+                    <StatusBadge status={reservation.status} />
+                    <span>
+                      {isBorrower ? 'Como prestatario' : 'Como prestamista'}
+                    </span>
+                  </div>
+                  <h2>{item.title}</h2>
+                  <p>
+                    <CalendarClock />
+                    {shortDate(reservation.snapshot.startAt)} —{' '}
+                    {shortDate(reservation.snapshot.endAt)}
+                  </p>
+                  <div className="mini-status">
+                    <span>
+                      <small>Pago</small>
+                      <StatusBadge status={reservation.paymentStatus} />
+                    </span>
+                    <span>
+                      <small>Garantía</small>
+                      <StatusBadge status={reservation.guaranteeStatus} />
+                    </span>
+                    <span>
+                      <small>Entrega</small>
+                      <strong>
+                        {reservation.deliveryRecorded
+                          ? 'Registrada'
+                          : 'Pendiente'}
+                      </strong>
+                    </span>
+                  </div>
+                  <div className="reservation-actions">
+                    <Button
+                      variant="outline"
+                      render={<Link to={`/reservations/${reservation.id}`} />}
+                    >
+                      Ver detalle
+                    </Button>
+                    {isBorrower &&
+                      reservation.paymentStatus === 'PENDING' &&
+                      reservation.status === 'CONFIRMED' && (
+                        <Button
+                          render={
+                            <Link
+                              to={`/reservations/${reservation.id}/checkout`}
+                            />
+                          }
+                        >
+                          Pagar
+                        </Button>
+                      )}
+                    {!isBorrower &&
+                      !reservation.deliveryRecorded &&
+                      reservation.paymentStatus === 'PENDING_RELEASE' &&
+                      ['HELD', 'NOT_REQUIRED'].includes(
+                        reservation.guaranteeStatus,
+                      ) && (
+                        <Button
+                          render={
+                            <Link
+                              to={`/loans/${loan?.id ?? 'new'}?delivery=${reservation.id}`}
+                            />
+                          }
+                        >
+                          Registrar entrega
+                        </Button>
+                      )}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState
+          title="No tienes reservas confirmadas"
+          description="Cuando una solicitud sea aceptada, aparecerá aquí."
+          action="Explorar objetos"
+          href="/explore"
+        />
+      )}
+    </>
+  );
 }
 
 export function ReservationDetailPage() {
-  const { id } = useParams(); const { state, cancelReservation } = useDemo(); const navigate = useNavigate(); const reservation = state.reservations.find((r) => r.id === id); const [cancelOpen, setCancelOpen] = useState(false); const [message, setMessage] = useState('');
-  if (!reservation) return <EmptyState title="Reserva no encontrada" description="Esta operación no está disponible." />; const listing = state.listings.find((l) => l.id === reservation.listingId)!; const counterpart = state.users.find((u) => u.id === (reservation.borrowerId === state.currentUserId ? reservation.lenderId : reservation.borrowerId)); const canCancel = reservation.status === 'CONFIRMED';
-  return <><PageHeader eyebrow={`Reserva ${reservation.id.toUpperCase()}`} title={listing.title} description="Detalle de la operación confirmada." action={<StatusBadge status={reservation.status} />} /><div className="info-banner immutable"><FileCheck2 /><p><strong>Condiciones confirmadas e inmutables.</strong> Estas son las condiciones aceptadas al confirmar la reserva. Los cambios posteriores en la publicación no afectan esta operación.</p></div><div className="detail-grid"><section className="panel"><span className="eyebrow">Fechas acordadas</span><h2>{shortDate(reservation.snapshot.startAt)}</h2><p>hasta {shortDate(reservation.snapshot.endAt)}</p><p><MapPin />{reservation.snapshot.exchangePlace}</p></section><section className="panel"><span className="eyebrow">Contraparte</span><UserChip user={counterpart} detail /><Reputation value={counterpart?.rating ?? 0} /></section><FinancialCard type="payment" amount={reservation.snapshot.dailyRate * 5} status={reservation.paymentStatus} note={reservation.paymentStatus === 'PENDING_RELEASE' ? 'Pago confirmado — pendiente de liberación al prestamista.' : 'Completa el pago para continuar.'} /><FinancialCard type="guarantee" amount={reservation.snapshot.guaranteeAmount} status={reservation.guaranteeStatus} note="Se libera después de que el prestamista confirme una devolución sin incidencias." /><section className="panel conditions-panel full"><span className="eyebrow">Condiciones congeladas</span><dl><div><dt>Uso</dt><dd>{reservation.snapshot.usage}</dd></div><div><dt>Entrega</dt><dd>{reservation.snapshot.delivery}</dd></div><div><dt>Devolución</dt><dd>{reservation.snapshot.returnPolicy}</dd></div><div><dt>Cancelación</dt><dd>{reservation.snapshot.cancellation}</dd></div></dl></section></div><div className="sticky-actions">{reservation.paymentStatus === 'PENDING' && <Button render={<Link to={`/reservations/${reservation.id}/checkout`} />}>Completar pago</Button>}{canCancel && <Button variant="destructive" onClick={() => setCancelOpen(true)}>Cancelar reserva</Button>}<Button variant="outline" render={<Link to="/reservations" />}>Volver</Button></div>{message && <p className="action-message">{message}</p>}<Dialog open={cancelOpen} onOpenChange={setCancelOpen}><DialogContent><DialogHeader><DialogTitle>Cancelar esta reserva</DialogTitle><DialogDescription>Se cancelarán las fechas acordadas. La política de cancelación permanece congelada según la confirmación original.</DialogDescription></DialogHeader><div className="economic-summary"><div><span>Tarifa</span><strong>{money(reservation.snapshot.dailyRate * 5)}</strong></div><div><span>Garantía</span><strong>{money(reservation.snapshot.guaranteeAmount)}</strong></div></div><DialogFooter><Button variant="outline" onClick={() => setCancelOpen(false)}>Volver</Button><Button variant="destructive" onClick={() => { const result = cancelReservation(reservation.id); setMessage(result.message); setCancelOpen(false); if (result.ok) navigate('/reservations'); }}>Confirmar cancelación</Button></DialogFooter></DialogContent></Dialog></>;
+  const { id } = useParams();
+  const { state, cancelReservation } = useDemo();
+  const reservation = state.reservations.find((item) => item.id === id);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [reason, setReason] = useState('Cambio de planes');
+  const [message, setMessage] = useState('');
+  if (!reservation)
+    return (
+      <EmptyState
+        title="Reserva no encontrada"
+        description="Esta operación no está disponible."
+      />
+    );
+  const item = state.listings.find(
+    (listing) => listing.id === reservation.listingId,
+  )!;
+  const counterpart = state.users.find(
+    (user) =>
+      user.id ===
+      (reservation.borrowerId === state.currentUserId
+        ? reservation.lenderId
+        : reservation.borrowerId),
+  );
+  const breakdown = economicBreakdown(reservation.snapshot);
+  const loan = state.loans.find(
+    (candidate) => candidate.reservationId === reservation.id,
+  );
+  const canCancel =
+    reservation.status === 'CONFIRMED' &&
+    !reservation.receiptConfirmedAt &&
+    loan?.status !== 'ACTIVE';
+  return (
+    <>
+      <PageHeader
+        eyebrow={`Reserva ${reservation.id.toUpperCase()}`}
+        title={item.title}
+        description="Detalle de la operación confirmada."
+        action={<StatusBadge status={reservation.status} />}
+      />
+      <div className="info-banner immutable">
+        <FileCheck2 />
+        <p>
+          <strong>Condiciones confirmadas e inmutables.</strong> Estas
+          condiciones corresponden al momento en que la reserva fue confirmada.
+        </p>
+      </div>
+      <div className="detail-grid">
+        <section className="panel">
+          <span className="eyebrow">Fechas acordadas</span>
+          <h2>{shortDate(reservation.snapshot.startAt)}</h2>
+          <p>hasta {shortDate(reservation.snapshot.endAt)}</p>
+          <p>
+            <MapPin />
+            {reservation.snapshot.exchangePlace}
+          </p>
+        </section>
+        <section className="panel">
+          <span className="eyebrow">Contraparte</span>
+          <UserChip user={counterpart} detail />
+          <Reputation
+            value={counterpart?.rating ?? 0}
+            count={counterpart?.ratingCount}
+          />
+          {reservation.status !== 'CANCELLED' &&
+            reservation.status !== 'COMPLETED' && (
+              <div className="contact-card">
+                <strong>Coordinación de entrega</strong>
+                <span>Teléfono: {counterpart?.phone}</span>
+              </div>
+            )}
+        </section>
+        <FinancialCard
+          type="payment"
+          amount={breakdown.fee + breakdown.serviceFee}
+          status={reservation.paymentStatus}
+          note={
+            reservation.paymentStatus === 'PENDING_RELEASE'
+              ? 'Pago confirmado — pendiente de liberación al prestamista.'
+              : reservation.paymentStatus === 'RELEASED'
+                ? 'Tarifa liberada al prestamista.'
+                : reservation.paymentStatus === 'REFUNDED'
+                  ? 'Tarifa reembolsada.'
+                  : 'Completa el pago para continuar.'
+          }
+        />
+        <FinancialCard
+          type="guarantee"
+          amount={reservation.snapshot.guaranteeAmount}
+          status={reservation.guaranteeStatus}
+          note="La garantía se mantiene separada de la tarifa."
+        />
+        <section className="panel conditions-panel full">
+          <span className="eyebrow">Condiciones congeladas</span>
+          <dl>
+            <div>
+              <dt>Uso</dt>
+              <dd>{reservation.snapshot.usage}</dd>
+            </div>
+            <div>
+              <dt>Entrega</dt>
+              <dd>{reservation.snapshot.delivery}</dd>
+            </div>
+            <div>
+              <dt>Devolución</dt>
+              <dd>{reservation.snapshot.returnPolicy}</dd>
+            </div>
+            <div>
+              <dt>Cancelación</dt>
+              <dd>{reservation.snapshot.cancellation}</dd>
+            </div>
+          </dl>
+        </section>
+      </div>
+      <div className="sticky-actions">
+        {reservation.paymentStatus === 'PENDING' &&
+          reservation.status === 'CONFIRMED' && (
+            <Button
+              render={<Link to={`/reservations/${reservation.id}/checkout`} />}
+            >
+              Completar pago
+            </Button>
+          )}
+        {canCancel && (
+          <Button variant="destructive" onClick={() => setCancelOpen(true)}>
+            Cancelar reserva
+          </Button>
+        )}{' '}
+        {!canCancel && reservation.status === 'ACTIVATED' && (
+          <span className="muted">
+            La cancelación ya no está disponible después de confirmar la
+            recepción.
+          </span>
+        )}
+        <Button variant="outline" render={<Link to="/reservations" />}>
+          Volver
+        </Button>
+      </div>
+      {message && <output className="action-message">{message}</output>}
+      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancelar esta reserva</DialogTitle>
+            <DialogDescription>
+              Se liberará el periodo, se reembolsará la tarifa aplicable y se
+              devolverá la garantía.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="economic-summary">
+            <div>
+              <span>Tarifa y comisión</span>
+              <strong>{money(breakdown.fee + breakdown.serviceFee)}</strong>
+            </div>
+            <div>
+              <span>Garantía</span>
+              <strong>{money(breakdown.guarantee)}</strong>
+            </div>
+          </div>
+          <label className="field">
+            <span>Motivo</span>
+            <textarea
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </label>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelOpen(false)}>
+              Volver
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!reason.trim()}
+              onClick={() => {
+                const result = cancelReservation(reservation.id, reason);
+                setMessage(result.message);
+                setCancelOpen(false);
+              }}
+            >
+              Confirmar cancelación
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 export function CheckoutPage() {
-  const { id } = useParams(); const { state, payReservation, holdGuarantee } = useDemo(); const navigate = useNavigate(); const reservation = state.reservations.find((r) => r.id === id); const [methods, setMethods] = useState<{ id: string; label: string; detail: string }[]>([]); const [selected, setSelected] = useState(''); const [loading, setLoading] = useState(false); useState(() => { paymentService.getAvailablePaymentMethods().then((items) => { setMethods(items); setSelected(items[0]?.id ?? ''); }); });
-  if (!reservation) return <EmptyState title="Reserva no encontrada" description="No se puede iniciar el checkout." />; const listing = state.listings.find((l) => l.id === reservation.listingId)!; const fee = reservation.snapshot.dailyRate * 5; const commission = Math.round(fee * .08); const total = fee + commission + reservation.snapshot.guaranteeAmount;
-  return <><PageHeader eyebrow="Pago seguro" title="Completa tu reserva" description={listing.title} /><div className="checkout-layout"><section className="panel"><h2>Selecciona un medio de pago</h2><div className="payment-methods">{methods.length ? methods.map((method) => <label key={method.id} className={selected === method.id ? 'selected' : ''}><input type="radio" name="method" checked={selected === method.id} onChange={() => setSelected(method.id)} /><span className="method-icon"><WalletCards /></span><span><strong>{method.label}</strong><small>{method.detail}</small></span><Check /></label>) : [1,2,3].map((n) => <div className="method-skeleton" key={n} />)}</div><div className="provider-note"><ShieldCheck /><p>El pago es procesado por un proveedor externo. LendUp no almacena información financiera sensible completa.</p></div></section><aside className="panel checkout-summary"><h2>Resumen</h2><div><span>Tarifa del préstamo</span><strong>{money(fee)}</strong></div><div><span>Comisión</span><strong>{money(commission)}</strong></div><div><span>Garantía monetaria</span><strong>{money(reservation.snapshot.guaranteeAmount)}</strong></div><div className="total"><span>Total requerido</span><strong>{money(total)}</strong></div><p>La garantía no forma parte de la tarifa y se mantendrá retenida hasta cerrar la operación.</p><Button size="lg" disabled={!selected || loading} onClick={() => { setLoading(true); setTimeout(() => { payReservation(reservation.id); holdGuarantee(reservation.id); navigate(`/reservations/${reservation.id}`); }, 700); }}>{loading ? 'Procesando…' : `Pagar ${money(total)}`}</Button></aside></div></>;
+  const { id } = useParams();
+  const { state, payReservation, holdGuarantee } = useDemo();
+  const navigate = useNavigate();
+  const reservation = state.reservations.find((item) => item.id === id);
+  const {
+    data: methods = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['payment-methods'],
+    queryFn: () => paymentService.getAvailablePaymentMethods(),
+  });
+  const [method, setMethod] = useState('Yape');
+  const [processing, setProcessing] = useState(false);
+  if (!reservation)
+    return (
+      <EmptyState
+        title="Reserva no encontrada"
+        description="No se puede completar este pago."
+      />
+    );
+  const item = state.listings.find(
+    (listing) => listing.id === reservation.listingId,
+  )!;
+  const breakdown = economicBreakdown(reservation.snapshot);
+  return (
+    <>
+      <PageHeader
+        eyebrow="Pago simulado"
+        title={`Completa tu reserva · ${item.title}`}
+        description="No se guarda información financiera sensible."
+      />
+      <div className="checkout-layout">
+        <section className="panel">
+          <h2>Medio de pago</h2>
+          {isLoading ? (
+            <LoadingSkeleton cards={1} />
+          ) : isError ? (
+            <ErrorState onRetry={() => refetch()} />
+          ) : (
+            <div className="payment-methods">
+              {methods.map((label) => (
+                <label
+                  key={label}
+                  className={method === label ? 'selected' : ''}
+                >
+                  <input
+                    type="radio"
+                    checked={method === label}
+                    onChange={() => setMethod(label)}
+                  />
+                  <WalletCards />
+                  <span>
+                    <strong>{label}</strong>
+                    <small>Método demo</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="info-banner">
+            <ShieldCheck />
+            <p>
+              Esta simulación no solicita números de tarjeta, claves ni códigos.
+            </p>
+          </div>
+        </section>
+        <aside className="panel checkout-summary">
+          <h2>Desglose económico</h2>
+          <div className="economic-summary">
+            <div>
+              <span>Tarifa · {breakdown.days} días</span>
+              <strong>{money(breakdown.fee)}</strong>
+            </div>
+            <div>
+              <span>Comisión</span>
+              <strong>{money(breakdown.serviceFee)}</strong>
+            </div>
+            <div>
+              <span>Garantía</span>
+              <strong>{money(breakdown.guarantee)}</strong>
+            </div>
+            <div className="total">
+              <span>Total</span>
+              <strong>{money(breakdown.total)}</strong>
+            </div>
+          </div>
+          <Button
+            size="lg"
+            disabled={processing || isLoading}
+            onClick={() => {
+              setProcessing(true);
+              setTimeout(() => {
+                payReservation(reservation.id, method);
+                holdGuarantee(reservation.id);
+                navigate(`/reservations/${reservation.id}`);
+              }, 500);
+            }}
+          >
+            {processing ? 'Procesando…' : 'Confirmar pago y garantía'}
+          </Button>
+        </aside>
+      </div>
+    </>
+  );
 }
 
 export function LoansPage() {
-  const { state } = useDemo(); const [filter, setFilter] = useState('Todos'); const loans = state.loans.filter((l) => l.borrowerId === state.currentUserId || l.lenderId === state.currentUserId).filter((l) => filter === 'Todos' || (filter === 'Activos' && l.status === 'ACTIVE') || (filter === 'Vencidos' && l.status === 'OVERDUE') || (filter === 'Finalizados' && l.status === 'COMPLETED') || (filter === 'Próximos' && l.status === 'PENDING_RECEIPT'));
-  return <><PageHeader eyebrow="Tus operaciones" title="Préstamos" description="Sigue cada operación desde la entrega hasta la devolución." /><div className="tabs-bar">{['Todos','Próximos','Activos','Vencidos','Finalizados'].map((value) => <button key={value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{value}</button>)}</div><div className="loan-grid">{loans.map((loan) => { const listing = state.listings.find((l) => l.id === loan.listingId)!; const person = state.users.find((u) => u.id === (loan.borrowerId === state.currentUserId ? loan.lenderId : loan.borrowerId)); const action = loan.status === 'PENDING_RECEIPT' ? 'Confirmar recepción' : loan.status === 'ACTIVE' ? 'Gestionar préstamo' : loan.status === 'RETURN_RECORDED' ? 'Confirmar devolución' : loan.status === 'OVERDUE' ? 'Registrar devolución' : 'Ver historial'; return <article className="loan-card" key={loan.id}><div className="loan-image"><img src={listing.image} alt={listing.title} /><StatusBadge status={loan.status} /></div><div className="loan-body"><p className="eyebrow">{loan.borrowerId === state.currentUserId ? 'Como prestatario' : 'Como prestamista'}</p><h2>{listing.title}</h2><UserChip user={person} /><div className="loan-dates"><span><small>Entrega</small>{shortDate(loan.snapshot.startAt)}</span><span><small>Devolución</small>{shortDate(loan.snapshot.endAt)}</span></div><div className="loan-economic"><span>Tarifa <StatusBadge status={loan.paymentStatus} /></span><span>Garantía <StatusBadge status={loan.guaranteeStatus} /></span></div><Button render={<Link to={`/loans/${loan.id}`} />}>{action}<ArrowRight /></Button></div></article>; })}</div></>;
+  const { state } = useDemo();
+  const [tab, setTab] = useState<
+    'UPCOMING' | 'ACTIVE' | 'OVERDUE' | 'COMPLETED'
+  >('ACTIVE');
+  const mine = state.loans.filter(
+    (item) =>
+      item.borrowerId === state.currentUserId ||
+      item.lenderId === state.currentUserId,
+  );
+  const filtered = mine.filter((item) =>
+    tab === 'UPCOMING'
+      ? ['PENDING_DELIVERY', 'PENDING_RECEIPT'].includes(item.status)
+      : item.status === tab ||
+        (tab === 'ACTIVE' && item.status === 'RETURN_RECORDED'),
+  );
+  return (
+    <>
+      <PageHeader
+        eyebrow="Operaciones"
+        title="Préstamos"
+        description="Revisa estado, próxima acción, tarifa, garantía y contraparte."
+      />
+      <div className="tabs-bar" role="tablist">
+        {(
+          [
+            { key: 'UPCOMING', label: 'Próximos' },
+            { key: 'ACTIVE', label: 'Activos' },
+            { key: 'OVERDUE', label: 'Vencidos' },
+            { key: 'COMPLETED', label: 'Finalizados' },
+          ] as const
+        ).map((item) => (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === item.key}
+            key={item.key}
+            className={tab === item.key ? 'active' : ''}
+            onClick={() => setTab(item.key)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      {filtered.length ? (
+        <div className="reservation-grid">
+          {filtered.map((item) => {
+            const listing = state.listings.find(
+              (candidate) => candidate.id === item.listingId,
+            )!;
+            const isBorrower = item.borrowerId === state.currentUserId;
+            const counterpart = state.users.find(
+              (user) =>
+                user.id === (isBorrower ? item.lenderId : item.borrowerId),
+            );
+            const next =
+              item.status === 'PENDING_RECEIPT'
+                ? 'Confirmar recepción'
+                : item.status === 'ACTIVE'
+                  ? 'Registrar devolución'
+                  : item.status === 'RETURN_RECORDED'
+                    ? 'Confirmar devolución'
+                    : item.status === 'OVERDUE'
+                      ? 'Coordinar devolución'
+                      : 'Calificar experiencia';
+            return (
+              <article className="reservation-card" key={item.id}>
+                <img src={listing.image} alt={listing.title} />
+                <div className="reservation-body">
+                  <div className="operation-top">
+                    <StatusBadge status={item.status} />
+                    <span>
+                      {isBorrower ? 'Como prestatario' : 'Como prestamista'}
+                    </span>
+                  </div>
+                  <h2>{listing.title}</h2>
+                  <UserChip user={counterpart} />
+                  <p>
+                    <CalendarClock />
+                    {shortDate(item.snapshot.startAt)} —{' '}
+                    {shortDate(item.currentReturnAt)}
+                  </p>
+                  <div className="mini-status">
+                    <span>
+                      <small>Próxima acción</small>
+                      <strong>{next}</strong>
+                    </span>
+                    <span>
+                      <small>Tarifa</small>
+                      <strong>
+                        {money(economicBreakdown(item.snapshot).fee)}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Garantía</small>
+                      <StatusBadge status={item.guaranteeStatus} />
+                    </span>
+                  </div>
+                  <Button render={<Link to={`/loans/${item.id}`} />}>
+                    Abrir operación
+                  </Button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState
+          title={`No tienes préstamos ${tab === 'ACTIVE' ? 'activos' : tab === 'UPCOMING' ? 'próximos' : tab === 'OVERDUE' ? 'vencidos' : 'finalizados'}`}
+          description="Cuando exista una operación en este estado, aparecerá aquí."
+        />
+      )}
+    </>
+  );
 }
 
+type LoanDialog =
+  | 'receipt'
+  | 'extension'
+  | 'reschedule'
+  | 'return'
+  | 'early'
+  | 'confirm'
+  | 'rating'
+  | null;
 export function LoanDetailPage() {
-  const { id } = useParams(); const { state, recordDelivery, confirmReceipt, requestExtension, respondExtension, recordReturn, confirmReturn, rateLoan } = useDemo(); const [dialog, setDialog] = useState<'receipt' | 'extension' | 'return' | 'early' | 'confirm' | 'rating' | 'delivery' | null>(null); const [notes, setNotes] = useState('El objeto se encuentra completo y funcionando correctamente.'); const [newDate, setNewDate] = useState('2026-10-15T18:00'); const [rating, setRating] = useState(5); const deliveryReservation = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('delivery'); const loan = state.loans.find((l) => l.id === id); const reservation = state.reservations.find((r) => r.id === (loan?.reservationId ?? deliveryReservation));
-  if (id === 'new' && reservation) return <DeliveryStandalone reservationId={reservation.id} onConfirm={() => { recordDelivery(reservation.id); }} />;
-  if (!loan) return <EmptyState title="Préstamo no encontrado" description="Esta operación no existe o todavía no fue creada." />; const listing = state.listings.find((l) => l.id === loan!.listingId)!; const isBorrower = loan.borrowerId === state.currentUserId; const counterpart = state.users.find((u) => u.id === (isBorrower ? loan!.lenderId : loan!.borrowerId)); const hasIncident = state.incidents.some((i) => i.loanId === loan!.id && i.status !== 'RESOLVED'); const nextAction = loan.status === 'PENDING_RECEIPT' ? 'Revisa las evidencias y confirma que recibiste el objeto.' : loan.status === 'ACTIVE' ? `Devuelve este objeto antes del ${shortDate(loan.snapshot.endAt)}.` : loan.status === 'RETURN_RECORDED' ? 'La devolución está registrada y espera confirmación del prestamista.' : loan.status === 'OVERDUE' ? 'La fecha de devolución venció. Coordina la entrega cuanto antes.' : 'La operación finalizó correctamente.';
-  return <><PageHeader eyebrow={`Préstamo ${loan.id.toUpperCase()} · ${isBorrower ? 'Como prestatario' : 'Como prestamista'}`} title={listing.title} description={`Con ${counterpart?.name}`} action={<StatusBadge status={loan.status} />} /><section className={`next-action compact ${loan.status === 'OVERDUE' ? 'danger' : ''}`}><div className="next-action-icon">{loan.status === 'OVERDUE' ? <AlertTriangle /> : <CalendarClock />}</div><div><p className="eyebrow">Próxima acción</p><h2>{nextAction}</h2></div></section><Tabs defaultValue="summary"><TabsList className="loan-tabs" variant="line"><TabsTrigger value="summary">Resumen</TabsTrigger><TabsTrigger value="timeline">Cronología</TabsTrigger><TabsTrigger value="conditions">Condiciones</TabsTrigger><TabsTrigger value="economy">Pago y garantía</TabsTrigger><TabsTrigger value="evidence">Evidencias</TabsTrigger><TabsTrigger value="extensions">Extensiones</TabsTrigger><TabsTrigger value="incidents">Incidencias</TabsTrigger></TabsList><TabsContent value="summary"><div className="detail-grid"><section className="panel"><span className="eyebrow">Contraparte</span><UserChip user={counterpart} detail /><Reputation value={counterpart?.rating ?? 0} /></section><section className="panel"><span className="eyebrow">Fechas acordadas</span><h2>{shortDate(loan.snapshot.startAt)}</h2><p>hasta {shortDate(loan.snapshot.endAt)}</p>{loan.earlyReturn && <div className="early-badge"><RotateCcw />Devolución anticipada</div>}</section><FinancialCard type="payment" amount={loan.snapshot.dailyRate * 5} status={loan.paymentStatus} note={loan.paymentStatus === 'RELEASED' ? 'Pago liberado al prestamista.' : 'Pago confirmado — pendiente de liberación.'} /><FinancialCard type="guarantee" amount={loan.snapshot.guaranteeAmount} status={loan.guaranteeStatus} note={hasIncident ? 'Garantía retenida mientras se revisa la incidencia.' : loan.status === 'RETURN_RECORDED' ? 'Esperando confirmación del prestamista.' : 'Se libera al confirmar la devolución sin incidencias.'} /></div></TabsContent><TabsContent value="timeline"><section className="panel"><Timeline items={loan.timeline} /></section></TabsContent><TabsContent value="conditions"><section className="panel conditions-panel"><div className="info-banner immutable"><FileCheck2 /><p>Estas son las condiciones aceptadas al confirmar la reserva.</p></div><dl><div><dt>Uso</dt><dd>{loan.snapshot.usage}</dd></div><div><dt>Entrega</dt><dd>{loan.snapshot.delivery}</dd></div><div><dt>Devolución</dt><dd>{loan.snapshot.returnPolicy}</dd></div><div><dt>Cancelación</dt><dd>{loan.snapshot.cancellation}</dd></div><div><dt>Lugar</dt><dd>{loan.snapshot.exchangePlace}</dd></div></dl></section></TabsContent><TabsContent value="economy"><div className="two-panel-grid"><FinancialCard type="payment" amount={loan.snapshot.dailyRate * 5} status={loan.paymentStatus} note={loan.paymentStatus === 'RELEASED' ? 'La recepción fue confirmada; la tarifa ya se liberó.' : 'Se liberará al confirmar la recepción.'} /><FinancialCard type="guarantee" amount={loan.snapshot.guaranteeAmount} status={loan.guaranteeStatus} note={hasIncident ? 'Garantía retenida mientras se revisa la incidencia.' : 'La garantía es independiente de la tarifa.'} /></div></TabsContent><TabsContent value="evidence"><EvidenceComparison loan={loan} /></TabsContent><TabsContent value="extensions"><section className="panel"><PageHeader title="Historial de extensiones" />{loan.extensionStatus ? <div className="extension-row"><span>Fecha original<strong>{shortDate(loan.snapshot.originalEndAt)}</strong></span><span>Nueva fecha<strong>{loan.extensionEndAt ? shortDate(loan.extensionEndAt) : '—'}</strong></span><span>Estado<StatusBadge status={loan.extensionStatus} /></span><span>Costo estimado<strong>{money(loan.snapshot.dailyRate * 3)}</strong></span></div> : <EmptyState title="Sin extensiones" description="No se ha solicitado ninguna extensión para este préstamo." />}{!isBorrower && loan.extensionStatus === 'PENDING' && <div className="inline-actions"><Button onClick={() => respondExtension(loan!.id, true)}>Aceptar extensión</Button><Button variant="destructive" onClick={() => respondExtension(loan!.id, false)}>Rechazar</Button></div>}</section></TabsContent><TabsContent value="incidents"><section className="panel">{state.incidents.filter((i) => i.loanId === loan!.id).map((incident) => <Link to={`/incidents/${incident.id}`} className="incident-row" key={incident.id}><ShieldAlert /><span><strong>{incident.id} · {incident.type}</strong><small>{incident.description}</small></span><StatusBadge status={incident.status} /></Link>)}{!state.incidents.some((i) => i.loanId === loan!.id) && <EmptyState title="Sin incidencias" description="No se han reportado problemas en esta operación." />}</section></TabsContent></Tabs><div className="sticky-actions loan-actions">{loan.status === 'PENDING_RECEIPT' && isBorrower && <Button onClick={() => setDialog('receipt')}>Confirmar que recibí el objeto</Button>}{loan.status === 'ACTIVE' && isBorrower && <><Button onClick={() => setDialog('extension')}>Solicitar extensión</Button><Button variant="outline" onClick={() => setDialog('return')}>Registrar devolución</Button><Button variant="secondary" onClick={() => setDialog('early')}><RotateCcw />Devolver antes de tiempo</Button></>}{loan.status === 'OVERDUE' && isBorrower && <Button onClick={() => setDialog('return')}>Registrar devolución</Button>}{loan.status === 'RETURN_RECORDED' && !isBorrower && <Button onClick={() => setDialog('confirm')}>Confirmar recepción</Button>}{loan.status === 'COMPLETED' && !loan.ratedBy.includes(state.currentUserId) && <Button onClick={() => setDialog('rating')}><Star />Calificar experiencia</Button>}{['ACTIVE','RETURN_RECORDED','OVERDUE'].includes(loan.status) && <Button variant="destructive" render={<Link to={`/incidents?loan=${loan.id}`} />}>Reportar incidencia</Button>}</div><LoanDialogs dialog={dialog} setDialog={setDialog} loanId={loan.id} notes={notes} setNotes={setNotes} newDate={newDate} setNewDate={setNewDate} rating={rating} setRating={setRating} onReceipt={() => confirmReceipt(loan!.id)} onExtension={() => requestExtension(loan!.id, new Date(newDate).toISOString())} onReturn={(early) => recordReturn(loan!.id, early, notes)} onConfirm={() => confirmReturn(loan!.id)} onRate={() => rateLoan(loan!.id, rating)} /></>;
+  const { id } = useParams();
+  const [params] = useSearchParams();
+  const {
+    state,
+    recordDelivery,
+    confirmReceipt,
+    requestExtension,
+    respondExtension,
+    proposeReschedule,
+    respondReschedule,
+    recordReturn,
+    confirmReturn,
+    rateLoan,
+    saveAnalysis,
+  } = useDemo();
+  const navigate = useNavigate();
+  const deliveryId = params.get('delivery');
+  const reservation = state.reservations.find((item) => item.id === deliveryId);
+  const item = state.loans.find((candidate) => candidate.id === id);
+  const [deliveryEvidence, setDeliveryEvidence] = useState<Evidence[]>([]);
+  const [dialog, setDialog] = useState<LoanDialog>(null);
+  const [newDate, setNewDate] = useState('2026-10-15T18:00');
+  const [notes, setNotes] = useState('');
+  const [returnEvidence, setReturnEvidence] = useState<Evidence[]>([]);
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState('');
+  const [message, setMessage] = useState('');
+  if (id === 'new' && reservation) {
+    const listing = state.listings.find(
+      (candidate) => candidate.id === reservation.listingId,
+    )!;
+    const current = state.users.find(
+      (user) => user.id === state.currentUserId,
+    )!;
+    return (
+      <>
+        <PageHeader
+          eyebrow="Entrega"
+          title={`Registrar entrega · ${listing.title}`}
+          description="Documenta el estado y funcionamiento antes de entregar."
+        />
+        <div className="info-banner">
+          <FileCheck2 />
+          <p>
+            <strong>Controles previos:</strong> pago{' '}
+            {reservation.paymentStatus === 'PENDING_RELEASE'
+              ? 'confirmado'
+              : 'pendiente'}{' '}
+            y garantía {reservation.guaranteeStatus}.
+          </p>
+        </div>
+        <section className="panel">
+          <EvidenceUploader
+            stage="BEFORE"
+            author={current.name}
+            authorId={current.id}
+            value={deliveryEvidence}
+            onChange={setDeliveryEvidence}
+          />
+          <Button
+            size="lg"
+            disabled={!deliveryEvidence.length}
+            onClick={() => {
+              const result = recordDelivery(reservation.id, deliveryEvidence);
+              setMessage(result.message);
+              if (result.ok) setTimeout(() => navigate('/loans'), 500);
+            }}
+          >
+            Confirmar entrega
+          </Button>
+          {message && <output className="action-message">{message}</output>}
+        </section>
+      </>
+    );
+  }
+  if (!item)
+    return (
+      <EmptyState
+        title="Préstamo no encontrado"
+        description="Esta operación no existe."
+      />
+    );
+  const listing = state.listings.find(
+    (candidate) => candidate.id === item.listingId,
+  )!;
+  const isBorrower = item.borrowerId === state.currentUserId;
+  const counterpart = state.users.find(
+    (user) => user.id === (isBorrower ? item.lenderId : item.borrowerId),
+  );
+  const breakdown = economicBreakdown(item.snapshot);
+  const unresolvedIncident = state.incidents.some(
+    (incident) => incident.loanId === item.id && incident.status !== 'RESOLVED',
+  );
+  const pendingExtension = item.extensions.findLast(
+    (extension) => extension.status === 'PENDING',
+  );
+  const pendingReschedule = item.reschedules.findLast(
+    (reschedule) => reschedule.status === 'PENDING',
+  );
+  const alreadyRated = item.ratedBy.includes(state.currentUserId);
+  const analysis = state.analyses.find(
+    (candidate) => candidate.loanId === item.id,
+  );
+  const runAnalysis = async () => {
+    saveAnalysis({
+      id: `analysis-${item.id}`,
+      loanId: item.id,
+      status: 'ANALYZING',
+      updatedAt: new Date().toISOString(),
+    });
+    const result = await evidenceAnalysisService.analyze(item.id);
+    saveAnalysis(result);
+  };
+  return (
+    <>
+      <PageHeader
+        eyebrow={`Préstamo ${item.id.toUpperCase()}`}
+        title={listing.title}
+        description={`${isBorrower ? 'Como prestatario' : 'Como prestamista'} · ${counterpart?.name}`}
+        action={<StatusBadge status={item.status} />}
+      />
+      <div className="info-banner immutable">
+        <FileCheck2 />
+        <p>
+          <strong>Condiciones congeladas.</strong> Estas condiciones
+          corresponden al momento en que la reserva fue confirmada.
+        </p>
+      </div>
+      <div className="detail-grid">
+        <section className="panel">
+          <span className="eyebrow">Periodo vigente</span>
+          <h2>{shortDate(item.snapshot.startAt)}</h2>
+          <p>hasta {shortDate(item.currentReturnAt)}</p>
+          {item.currentReturnAt !== item.originalReturnAt && (
+            <p className="muted">
+              Fecha original: {shortDate(item.originalReturnAt)}
+            </p>
+          )}
+          <p>
+            <MapPin />
+            {item.snapshot.exchangePlace}
+          </p>
+        </section>
+        <section className="panel">
+          <span className="eyebrow">Contraparte</span>
+          <UserChip user={counterpart} detail />
+          {item.status !== 'COMPLETED' && (
+            <div className="contact-card">
+              <strong>Coordinación de entrega</strong>
+              <span>Teléfono: {counterpart?.phone}</span>
+            </div>
+          )}
+        </section>
+        <FinancialCard
+          type="payment"
+          amount={breakdown.fee + breakdown.serviceFee}
+          status={item.paymentStatus}
+          note={
+            item.paymentStatus === 'RELEASED'
+              ? 'Tarifa liberada al prestamista.'
+              : 'Pago confirmado — pendiente de liberación al prestamista.'
+          }
+        />
+        <FinancialCard
+          type="guarantee"
+          amount={item.snapshot.guaranteeAmount}
+          status={item.guaranteeStatus}
+          note={
+            unresolvedIncident
+              ? 'Garantía retenida mientras se resuelve la incidencia.'
+              : 'Estado actual de la garantía.'
+          }
+        />
+      </div>
+      <section className="panel">
+        <span className="eyebrow">Trazabilidad</span>
+        <Timeline items={item.timeline} />
+      </section>
+      <EvidenceComparison
+        evidence={item.evidence}
+        analysis={analysis}
+        onAnalyze={runAnalysis}
+      />
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Historial</span>
+            <h2>Extensiones y reprogramaciones</h2>
+          </div>
+          <RotateCcw />
+        </div>
+        {!item.extensions.length && !item.reschedules.length ? (
+          <p className="muted">No hay cambios de fecha registrados.</p>
+        ) : (
+          <div className="history-list">
+            {item.extensions.map((extension) => (
+              <article key={extension.id}>
+                <strong>Extensión solicitada por el prestatario</strong>
+                <span>
+                  {shortDate(extension.originalReturnAt)} →{' '}
+                  {shortDate(extension.proposedReturnAt)}
+                </span>
+                <span>Costo adicional: {money(extension.additionalCost)}</span>
+                <StatusBadge status={extension.status} />
+              </article>
+            ))}
+            {item.reschedules.map((reschedule) => (
+              <article key={reschedule.id}>
+                <strong>Reprogramación propuesta por el prestamista</strong>
+                <span>
+                  {shortDate(reschedule.originalReturnAt)} →{' '}
+                  {shortDate(reschedule.proposedReturnAt)}
+                </span>
+                <span>Costo adicional: {money(0)}</span>
+                <StatusBadge status={reschedule.status} />
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+      <div className="sticky-actions">
+        {isBorrower && item.status === 'PENDING_RECEIPT' && (
+          <Button onClick={() => setDialog('receipt')}>
+            Confirmar recepción
+          </Button>
+        )}
+        {isBorrower && item.status === 'ACTIVE' && (
+          <>
+            <Button variant="outline" onClick={() => setDialog('extension')}>
+              Solicitar extensión
+            </Button>
+            <Button onClick={() => setDialog('return')}>
+              Registrar devolución
+            </Button>
+            <Button variant="outline" onClick={() => setDialog('early')}>
+              Devolver antes de tiempo
+            </Button>
+          </>
+        )}
+        {!isBorrower && item.status === 'ACTIVE' && (
+          <Button variant="outline" onClick={() => setDialog('reschedule')}>
+            Proponer nueva fecha
+          </Button>
+        )}
+        {!isBorrower && pendingExtension && (
+          <>
+            <Button onClick={() => respondExtension(item.id, true)}>
+              Aceptar extensión
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => respondExtension(item.id, false)}
+            >
+              Rechazar extensión
+            </Button>
+          </>
+        )}
+        {isBorrower && pendingReschedule && (
+          <>
+            <Button onClick={() => respondReschedule(item.id, true)}>
+              Aceptar reprogramación
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => respondReschedule(item.id, false)}
+            >
+              Rechazar reprogramación
+            </Button>
+          </>
+        )}
+        {!isBorrower && item.status === 'RETURN_RECORDED' && (
+          <>
+            <Button onClick={() => setDialog('confirm')}>
+              Confirmar devolución
+            </Button>
+            <Button
+              variant="destructive"
+              render={<Link to={`/incidents?loan=${item.id}`} />}
+            >
+              <ShieldAlert />
+              Reportar incidencia
+            </Button>
+          </>
+        )}
+        {item.status === 'COMPLETED' && !alreadyRated && (
+          <Button onClick={() => setDialog('rating')}>
+            Calificar experiencia
+          </Button>
+        )}
+        {item.status === 'COMPLETED' && alreadyRated && (
+          <span className="success-text">Ya calificaste esta operación.</span>
+        )}
+        {item.status === 'ACTIVE' && (
+          <span className="muted">Un préstamo activo no puede cancelarse.</span>
+        )}
+      </div>
+      {message && <output className="action-message">{message}</output>}
+      <LoanActionDialog
+        dialog={dialog}
+        onClose={() => setDialog(null)}
+        item={item}
+        currentUser={state.users.find(
+          (user) => user.id === state.currentUserId,
+        )!}
+        newDate={newDate}
+        setNewDate={setNewDate}
+        notes={notes}
+        setNotes={setNotes}
+        evidence={returnEvidence}
+        setEvidence={setReturnEvidence}
+        rating={rating}
+        setRating={setRating}
+        comment={comment}
+        setComment={setComment}
+        onSubmit={() => {
+          if (dialog === 'receipt') confirmReceipt(item.id);
+          if (dialog === 'extension') {
+            const result = requestExtension(
+              item.id,
+              new Date(newDate).toISOString(),
+            );
+            setMessage(result.message);
+          }
+          if (dialog === 'reschedule') {
+            const result = proposeReschedule(
+              item.id,
+              new Date(newDate).toISOString(),
+            );
+            setMessage(result.message);
+          }
+          if (dialog === 'return' || dialog === 'early')
+            recordReturn(item.id, dialog === 'early', notes, returnEvidence);
+          if (dialog === 'confirm') confirmReturn(item.id);
+          if (dialog === 'rating') {
+            const result = rateLoan(item.id, rating, comment);
+            setMessage(result.message);
+          }
+          setDialog(null);
+        }}
+      />
+    </>
+  );
 }
 
-function DeliveryStandalone({ reservationId, onConfirm }: { reservationId: string; onConfirm: () => void }) { const navigate = useNavigate(); const [done, setDone] = useState(false); return <><PageHeader eyebrow="Como prestamista" title="Registrar entrega" description="Documenta el estado inicial antes de entregar el objeto." /><div className="delivery-layout"><section className="panel"><h2>Checklist previo</h2><ul className="checklist"><li><CheckCircle2 />Pago confirmado</li><li><CheckCircle2 />Garantía retenida o no requerida</li><li><CheckCircle2 />Condiciones aceptadas</li></ul></section><section className="panel"><h2>Evidencias iniciales</h2><div className="upload-zone compact"><ImagePlus /><p>Agrega fotos y videos del estado y funcionamiento.</p><Button variant="outline"><Upload />Seleccionar archivos</Button></div><label className="field"><span>Observaciones</span><textarea defaultValue="Objeto completo y funcionando correctamente." /></label></section></div>{done ? <div className="success-box"><CheckCircle2 /><div><strong>Entrega registrada</strong><p>Esperando confirmación del prestatario.</p></div></div> : <Button size="lg" onClick={() => { onConfirm(); setDone(true); setTimeout(() => navigate('/loans'), 600); }}>Confirmar entrega</Button>}</> }
+function EvidenceComparison({
+  evidence,
+  analysis,
+  onAnalyze,
+}: {
+  evidence: Evidence[];
+  analysis?: ReturnType<typeof useDemo>['state']['analyses'][number];
+  onAnalyze: () => void;
+}) {
+  const before = evidence.filter((item) => item.stage === 'BEFORE');
+  const after = evidence.filter((item) => item.stage === 'AFTER');
+  return (
+    <section className="panel">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Evidencias</span>
+          <h2>Comparación antes y después</h2>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onAnalyze}
+          disabled={analysis?.status === 'ANALYZING'}
+        >
+          {analysis?.status === 'ANALYZING'
+            ? 'Analizando…'
+            : 'Simular análisis'}
+        </Button>
+      </div>
+      <div className="ai-banner">
+        <ShieldCheck />
+        <div>
+          <strong>Análisis automático · {analysis?.status ?? 'IDLE'}</strong>
+          <p>
+            {analysis?.summary ??
+              'Inicia el análisis simulado cuando existan evidencias.'}
+          </p>
+          <small>
+            El análisis automático es únicamente información de apoyo y no
+            determina responsabilidades.
+          </small>
+        </div>
+      </div>
+      <div className="evidence-comparison">
+        <EvidenceColumn title="Antes de la entrega" items={before} />
+        <EvidenceColumn title="Después de la devolución" items={after} />
+      </div>
+    </section>
+  );
+}
+function EvidenceColumn({
+  title,
+  items,
+}: {
+  title: string;
+  items: Evidence[];
+}) {
+  return (
+    <section>
+      <span className="eyebrow">{title}</span>
+      {items.length ? (
+        items.map((item) => (
+          <div className="evidence-tile" key={item.id}>
+            {item.url && item.type === 'PHOTO' ? (
+              <img src={item.url} alt={item.label} />
+            ) : (
+              <Camera />
+            )}
+            <strong>{item.label}</strong>
+            <span>
+              {item.author} · {shortDate(item.date)}
+            </span>
+          </div>
+        ))
+      ) : (
+        <p className="muted">Sin evidencias.</p>
+      )}
+    </section>
+  );
+}
 
-function EvidenceComparison({ loan }: { loan: ReturnType<typeof useDemo>['state']['loans'][number] }) { const before = loan.evidence.filter((e) => e.stage === 'BEFORE'); const after = loan.evidence.filter((e) => e.stage === 'AFTER'); return <><div className="ai-banner"><ShieldCheck /><div><strong>Análisis automático: resultado disponible</strong><p>Se detecta una posible diferencia visual menor en la esquina superior derecha.</p><small>El análisis automático es únicamente información de apoyo y no determina responsabilidades.</small></div></div><div className="evidence-comparison"><section><span className="eyebrow">Antes de la entrega</span>{before.length ? before.map((e) => <div className="evidence-tile" key={e.id}><Camera /><strong>{e.label}</strong><span>{e.author} · {e.date}</span></div>) : <p>Sin evidencias.</p>}</section><section><span className="eyebrow">Después de la devolución</span>{after.length ? after.map((e) => <div className="evidence-tile" key={e.id}><Camera /><strong>{e.label}</strong><span>{e.author} · {e.date}</span></div>) : <div className="evidence-empty"><Camera /><p>Las evidencias finales aparecerán al registrar la devolución.</p></div>}</section></div></> }
-
-interface LoanDialogsProps { dialog: string | null; setDialog: (value: null) => void; loanId: string; notes: string; setNotes: (value: string) => void; newDate: string; setNewDate: (value: string) => void; rating: number; setRating: (value: number) => void; onReceipt: () => void; onExtension: () => void; onReturn: (early: boolean) => void; onConfirm: () => void; onRate: () => void; }
-function LoanDialogs(props: LoanDialogsProps) { const close = () => props.setDialog(null); const title = props.dialog === 'receipt' ? 'Confirmar recepción' : props.dialog === 'extension' ? 'Solicitar extensión' : props.dialog === 'early' ? 'Devolver antes de tiempo' : props.dialog === 'confirm' ? 'Confirmar devolución' : props.dialog === 'rating' ? 'Calificar experiencia' : 'Registrar devolución'; return <Dialog open={Boolean(props.dialog)} onOpenChange={(open) => !open && close()}><DialogContent className="flow-dialog"><DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{props.dialog === 'receipt' ? 'Después de confirmar la recepción, el préstamo quedará activo y ya no podrá cancelarse.' : props.dialog === 'early' ? 'La devolución anticipada sigue el proceso normal de evidencias y confirmación.' : 'Revisa la información antes de confirmar.'}</DialogDescription></DialogHeader>{props.dialog === 'receipt' && <div className="warning-box"><AlertTriangle /><p>La tarifa se liberará al prestamista inmediatamente después de esta confirmación.</p></div>}{props.dialog === 'extension' && <div className="field-grid single"><label className="field"><span>Nueva fecha y hora</span><input type="datetime-local" value={props.newDate} onChange={(e) => props.setNewDate(e.target.value)} /></label><div className="economic-summary"><div><span>Días adicionales</span><strong>3</strong></div><div><span>Costo estimado</span><strong>S/ 114</strong></div><div><span>Disponibilidad</span><strong className="success-text">Disponible</strong></div></div></div>}{props.dialog === 'early' && <><div className="warning-box strong"><AlertTriangle /><p><strong>La devolución anticipada no genera automáticamente un reembolso proporcional de la tarifa pagada.</strong></p></div><p>Registrarás evidencias finales y la garantía seguirá retenida hasta que el prestamista confirme la devolución.</p></>}{(props.dialog === 'return') && <ReturnForm notes={props.notes} setNotes={props.setNotes} />}{props.dialog === 'confirm' && <><div className="evidence-comparison compact"><section><span className="eyebrow">Antes</span><div className="evidence-tile"><Camera /><strong>Estado inicial registrado</strong></div></section><section><span className="eyebrow">Después</span><div className="evidence-tile"><Camera /><strong>Evidencias finales</strong></div></section></div><div className="success-box"><CheckCircle2 /><p>Al confirmar sin incidencias, el préstamo finalizará y la garantía será liberada. El periodo restante volverá a estar disponible.</p></div></>}{props.dialog === 'rating' && <div className="rating-input"><p>¿Cómo fue tu experiencia?</p><div>{[1,2,3,4,5].map((value) => <button key={value} onClick={() => props.setRating(value)} aria-label={`${value} estrellas`}><Star fill={value <= props.rating ? 'currentColor' : 'none'} /></button>)}</div><textarea placeholder="Comentario opcional" /></div>}<DialogFooter><Button variant="outline" onClick={close}>Volver</Button><Button onClick={() => { if (props.dialog === 'receipt') props.onReceipt(); if (props.dialog === 'extension') props.onExtension(); if (props.dialog === 'return') props.onReturn(false); if (props.dialog === 'early') props.onReturn(true); if (props.dialog === 'confirm') props.onConfirm(); if (props.dialog === 'rating') props.onRate(); close(); }}>{props.dialog === 'early' ? 'Continuar con devolución anticipada' : props.dialog === 'confirm' ? 'Confirmar recepción' : props.dialog === 'rating' ? 'Enviar calificación' : 'Confirmar'}</Button></DialogFooter></DialogContent></Dialog>; }
-function ReturnForm({ notes, setNotes }: { notes: string; setNotes: (value: string) => void }) { return <div className="return-form"><div className="upload-zone compact"><ImagePlus /><h3>Evidencias finales</h3><p>Agrega fotos o videos del estado actual.</p><Button variant="outline"><Upload />Seleccionar archivos</Button></div><label className="field"><span>Estado y funcionamiento</span><select><option>Funciona correctamente</option><option>Presenta una observación</option><option>No funciona</option></select></label><label className="field"><span>Observaciones</span><textarea value={notes} onChange={(e) => setNotes(e.target.value)} /></label></div> }
+function LoanActionDialog({
+  dialog,
+  onClose,
+  item,
+  currentUser,
+  newDate,
+  setNewDate,
+  notes,
+  setNotes,
+  evidence,
+  setEvidence,
+  rating,
+  setRating,
+  comment,
+  setComment,
+  onSubmit,
+}: {
+  dialog: LoanDialog;
+  onClose: () => void;
+  item: ReturnType<typeof useDemo>['state']['loans'][number];
+  currentUser: ReturnType<typeof useDemo>['state']['users'][number];
+  newDate: string;
+  setNewDate: (value: string) => void;
+  notes: string;
+  setNotes: (value: string) => void;
+  evidence: Evidence[];
+  setEvidence: (value: Evidence[]) => void;
+  rating: number;
+  setRating: (value: number) => void;
+  comment: string;
+  setComment: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  const title =
+    dialog === 'receipt'
+      ? 'Confirmar recepción'
+      : dialog === 'extension'
+        ? 'Solicitar extensión'
+        : dialog === 'reschedule'
+          ? 'Proponer nueva fecha'
+          : dialog === 'early'
+            ? 'Devolver antes de tiempo'
+            : dialog === 'confirm'
+              ? 'Confirmar devolución'
+              : dialog === 'rating'
+                ? 'Calificar experiencia'
+                : 'Registrar devolución';
+  const needsEvidence = dialog === 'return' || dialog === 'early';
+  const validDate = new Date(newDate) > new Date(item.currentReturnAt);
+  return (
+    <Dialog open={Boolean(dialog)} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="flow-dialog">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>
+            {dialog === 'receipt'
+              ? 'Después de confirmar, el préstamo quedará activo y la tarifa se liberará.'
+              : dialog === 'early'
+                ? 'La devolución anticipada usa el mismo proceso de evidencias y confirmación.'
+                : 'Revisa la información antes de confirmar.'}
+          </DialogDescription>
+        </DialogHeader>
+        {dialog === 'receipt' && (
+          <div className="warning-box">
+            <AlertTriangle />
+            <p>
+              Después de confirmar la recepción, esta operación ya no podrá
+              cancelarse.
+            </p>
+          </div>
+        )}
+        {(dialog === 'extension' || dialog === 'reschedule') && (
+          <>
+            <label className="field">
+              <span>Nueva fecha y hora</span>
+              <input
+                type="datetime-local"
+                value={newDate}
+                onChange={(event) => setNewDate(event.target.value)}
+              />
+            </label>
+            <div className="economic-summary">
+              <div>
+                <span>Costo adicional</span>
+                <strong>
+                  {dialog === 'reschedule'
+                    ? money(0)
+                    : money(
+                        extensionCost(
+                          item.currentReturnAt,
+                          newDate,
+                          item.snapshot.dailyRate,
+                        ),
+                      )}
+                </strong>
+              </div>
+            </div>
+            {!validDate && (
+              <p className="field-error">
+                La fecha propuesta debe ser posterior a la fecha vigente.
+              </p>
+            )}
+          </>
+        )}
+        {dialog === 'early' && (
+          <div className="warning-box strong">
+            <AlertTriangle />
+            <p>
+              <strong>
+                Devolver el objeto antes de la fecha acordada no genera
+                automáticamente un reembolso proporcional de la tarifa pagada.
+              </strong>
+            </p>
+          </div>
+        )}
+        {needsEvidence && (
+          <>
+            <EvidenceUploader
+              stage="AFTER"
+              author={currentUser.name}
+              authorId={currentUser.id}
+              value={evidence}
+              onChange={setEvidence}
+              label="Evidencias finales"
+            />
+            <label className="field">
+              <span>Estado, funcionamiento y observaciones</span>
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+              />
+            </label>
+          </>
+        )}
+        {dialog === 'confirm' && (
+          <div className="success-box">
+            <CheckCircle2 />
+            <p>
+              Si no existe una incidencia abierta, la garantía se liberará. Si
+              existe, seguirá retenida hasta su resolución.
+            </p>
+          </div>
+        )}
+        {dialog === 'rating' && (
+          <div className="rating-input">
+            <p>¿Cómo fue tu experiencia?</p>
+            <div>
+              {[1, 2, 3, 4, 5].map((value) => (
+                <button
+                  type="button"
+                  key={value}
+                  onClick={() => setRating(value)}
+                  aria-label={`${value} estrellas`}
+                >
+                  <Star fill={value <= rating ? 'currentColor' : 'none'} />
+                </button>
+              ))}
+            </div>
+            <label className="field">
+              <span>Comentario</span>
+              <textarea
+                value={comment}
+                onChange={(event) => setComment(event.target.value)}
+              />
+            </label>
+          </div>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Volver
+          </Button>
+          <Button
+            type="button"
+            disabled={
+              (needsEvidence && !evidence.length) ||
+              ((dialog === 'extension' || dialog === 'reschedule') &&
+                !validDate) ||
+              (dialog === 'rating' && (rating < 1 || rating > 5))
+            }
+            onClick={onSubmit}
+          >
+            Confirmar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

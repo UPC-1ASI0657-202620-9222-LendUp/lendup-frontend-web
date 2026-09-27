@@ -1,47 +1,1054 @@
 'use client';
 
-import { useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, ArrowRight, CalendarDays, Camera, Check, CheckCircle2, ChevronRight, Edit3, ImagePlus, MapPin, Pause, Plus, Search, ShieldCheck, Trash2, Upload } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import {
+  ArrowLeft,
+  ArrowRight,
+  CalendarDays,
+  Camera,
+  Check,
+  CheckCircle2,
+  Edit3,
+  ImagePlus,
+  MapPin,
+  Pause,
+  Plus,
+  Search,
+  ShieldCheck,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { EmptyState, ListingCard, PageHeader, Reputation, StatusBadge, UserChip, money } from '@/components/lendup/shared';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  EmptyState,
+  ErrorState,
+  ListingCard,
+  LoadingSkeleton,
+  PageHeader,
+  Reputation,
+  StatusBadge,
+  UserChip,
+  money,
+  shortDate,
+} from '@/components/lendup/shared';
 import { useDemo } from '@/stores/demo-store';
-import { listingService } from '@/services/mock.service';
+import { listingService } from '@/services/domain-services';
+import { economicBreakdown, isPeriodAvailable } from '@/lib/business-rules';
+import type { AvailabilitySlot, ListingMedia } from '@/types/domain';
 
 export function ExplorePage() {
-  const { state } = useDemo(); const [params] = useSearchParams(); const [query, setQuery] = useState(params.get('q') ?? ''); const [category, setCategory] = useState('Todas'); const [campus, setCampus] = useState('Todos');
-  const { data = [], isLoading, isError } = useQuery({ queryKey: ['listings', state.listings], queryFn: () => listingService.getListings(state) });
-  const filtered = data.filter((listing) => (!query || `${listing.title} ${listing.category}`.toLowerCase().includes(query.toLowerCase())) && (category === 'Todas' || listing.category === category) && (campus === 'Todos' || listing.campus === campus));
-  return <><PageHeader eyebrow="Comunidad LendUp" title="Encuentra lo que necesitas" description="Objetos disponibles dentro de comunidades universitarias verificadas." /><div className="search-bar"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar calculadoras, cámaras, libros..." /><Button>Buscar</Button></div><div className="filter-row"><select aria-label="Categoría" value={category} onChange={(event) => setCategory(event.target.value)}>{['Todas','Calculadoras','Cámaras','Libros','Herramientas','Electrónica'].map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Campus" value={campus} onChange={(event) => setCampus(event.target.value)}>{['Todos','Monterrico','San Miguel','Rímac','Ciudad Universitaria'].map((value) => <option key={value}>{value}</option>)}</select><input type="date" aria-label="Fecha" /><select aria-label="Horario"><option>Cualquier horario</option><option>Mañana</option><option>Tarde</option></select><span className="result-count">{filtered.length} objetos</span></div>{isLoading ? <div className="listing-grid">{[1,2,3].map((n) => <div className="listing-skeleton" key={n} />)}</div> : isError ? <EmptyState title="No pudimos cargar los objetos" description="Intenta nuevamente en unos segundos." /> : filtered.length ? <div className="listing-grid">{filtered.map((listing) => <ListingCard key={listing.id} listing={listing} owner={state.users.find((u) => u.id === listing.ownerId)} />)}</div> : <EmptyState title="No encontramos coincidencias" description="Prueba con otra categoría, campus o palabra clave." action="Limpiar filtros" href="/explore" />}</>;
+  const { state } = useDemo();
+  const [params] = useSearchParams();
+  const [filters, setFilters] = useState({
+    query: params.get('q') ?? '',
+    category: '',
+    university: '',
+    campus: '',
+    location: '',
+    date: '',
+    time: '',
+  });
+  const {
+    data = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['listings', state.listings],
+    queryFn: () => listingService.getListings(state),
+  });
+  const filtered = useMemo(
+    () =>
+      data.filter((item) => {
+        const text =
+          `${item.title} ${item.category} ${item.description}`.toLowerCase();
+        const matchesDate =
+          !filters.date ||
+          item.availabilitySlots.some(
+            (slot) =>
+              slot.status === 'AVAILABLE' &&
+              new Date(slot.startAt) <=
+                new Date(`${filters.date}T${filters.time || '23:59'}`) &&
+              new Date(slot.endAt) >=
+                new Date(`${filters.date}T${filters.time || '00:00'}`),
+          );
+        return (
+          (!filters.query || text.includes(filters.query.toLowerCase())) &&
+          (!filters.category || item.category === filters.category) &&
+          (!filters.university || item.university === filters.university) &&
+          (!filters.campus || item.campus === filters.campus) &&
+          (!filters.location ||
+            item.location
+              .toLowerCase()
+              .includes(filters.location.toLowerCase())) &&
+          matchesDate
+        );
+      }),
+    [data, filters],
+  );
+  const update = (key: keyof typeof filters, value: string) =>
+    setFilters((current) => ({ ...current, [key]: value }));
+  const clear = () =>
+    setFilters({
+      query: '',
+      category: '',
+      university: '',
+      campus: '',
+      location: '',
+      date: '',
+      time: '',
+    });
+  return (
+    <>
+      <PageHeader
+        eyebrow="Comunidad LendUp"
+        title="Encuentra lo que necesitas"
+        description="Objetos disponibles dentro de comunidades universitarias verificadas."
+      />
+      <div className="search-bar">
+        <Search />
+        <input
+          aria-label="Buscar objetos"
+          value={filters.query}
+          onChange={(event) => update('query', event.target.value)}
+          placeholder="Buscar calculadoras, cámaras, libros…"
+        />
+      </div>
+      <div className="filter-row">
+        <select
+          aria-label="Categoría"
+          value={filters.category}
+          onChange={(event) => update('category', event.target.value)}
+        >
+          <option value="">Todas las categorías</option>
+          {[
+            'Calculadoras',
+            'Cámaras',
+            'Libros',
+            'Herramientas',
+            'Electrónica',
+          ].map((value) => (
+            <option key={value}>{value}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Universidad"
+          value={filters.university}
+          onChange={(event) => update('university', event.target.value)}
+        >
+          <option value="">Todas las universidades</option>
+          {['UPC', 'PUCP', 'UNI', 'UNMSM'].map((value) => (
+            <option key={value}>{value}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Campus"
+          value={filters.campus}
+          onChange={(event) => update('campus', event.target.value)}
+        >
+          <option value="">Todos los campus</option>
+          {Array.from(new Set(data.map((item) => item.campus))).map((value) => (
+            <option key={value}>{value}</option>
+          ))}
+        </select>
+        <input
+          aria-label="Ubicación"
+          value={filters.location}
+          onChange={(event) => update('location', event.target.value)}
+          placeholder="Distrito"
+        />
+        <input
+          type="date"
+          aria-label="Fecha"
+          value={filters.date}
+          onChange={(event) => update('date', event.target.value)}
+        />
+        <input
+          type="time"
+          aria-label="Hora"
+          value={filters.time}
+          onChange={(event) => update('time', event.target.value)}
+        />
+        <Button type="button" variant="outline" onClick={clear}>
+          Limpiar filtros
+        </Button>
+        <output className="result-count">{filtered.length} objetos</output>
+      </div>
+      {isLoading ? (
+        <LoadingSkeleton />
+      ) : isError ? (
+        <ErrorState onRetry={() => refetch()} />
+      ) : filtered.length ? (
+        <div className="listing-grid">
+          {filtered.map((item) => (
+            <ListingCard
+              key={item.id}
+              listing={item}
+              owner={state.users.find((user) => user.id === item.ownerId)}
+            />
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          title="No encontramos coincidencias"
+          description="Prueba con otra fecha, campus o palabra clave."
+          action="Limpiar filtros"
+          onAction={clear}
+        />
+      )}
+    </>
+  );
 }
 
 export function ObjectDetailPage() {
-  const { id } = useParams(); const { state } = useDemo(); const listing = state.listings.find((item) => item.id === id); const owner = state.users.find((user) => user.id === listing?.ownerId); const [open, setOpen] = useState(false);
-  if (!listing) return <EmptyState title="Objeto no encontrado" description="La publicación ya no está disponible." action="Volver a explorar" href="/explore" />;
-  return <><Link className="back-link" to="/explore"><ArrowLeft />Volver a explorar</Link><div className="object-layout"><section className="object-gallery"><img src={listing.image} alt={listing.title} /><div><img src={listing.image} alt="Vista adicional del objeto" /><div className="gallery-placeholder"><Camera /><span>+3 fotos</span></div></div></section><aside className="object-summary"><div className="listing-meta"><span>{listing.category}</span><StatusBadge status={listing.status} /></div><h1>{listing.title}</h1><div className="object-location"><MapPin />{listing.campus} · {listing.location}</div><p>{listing.description}</p><div className="price-block"><strong>{money(listing.dailyRate)}</strong><span>por día</span><small>Garantía reembolsable: {money(listing.guaranteeAmount)}</small></div><Button size="lg" onClick={() => setOpen(true)} disabled={listing.ownerId === state.currentUserId}>Solicitar préstamo <ArrowRight /></Button>{listing.ownerId === state.currentUserId && <p className="own-listing-note">Este objeto te pertenece. Puedes administrarlo desde Mis objetos.</p>}</aside></div><div className="detail-grid"><section className="panel"><span className="eyebrow">Disponibilidad</span><h2>Próximas fechas</h2><div className="availability-days">{listing.availability.map((day) => <span key={day}><Check />{day}</span>)}</div><p className="muted">Los periodos reservados no pueden modificarse desde la publicación.</p></section><section className="panel"><span className="eyebrow">Punto de intercambio</span><h2>{listing.exchangePlace}</h2><p className="muted">La ubicación exacta y los datos de contacto se comparten al confirmar la reserva.</p></section><section className="panel conditions-panel"><span className="eyebrow">Condiciones actuales</span><h2>Acuerdos claros antes de solicitar</h2><dl><div><dt>Uso</dt><dd>{listing.terms.usage}</dd></div><div><dt>Entrega</dt><dd>{listing.terms.delivery}</dd></div><div><dt>Devolución</dt><dd>{listing.terms.returnPolicy}</dd></div><div><dt>Cancelación</dt><dd>{listing.terms.cancellation}</dd></div></dl></section><section className="panel owner-panel"><span className="eyebrow">Prestamista</span><UserChip user={owner} detail /><div className="owner-stats"><span><Reputation value={owner?.rating ?? 0} /> valoración</span><span><ShieldCheck />Identidad verificada</span></div><Button variant="outline" render={<Link to={`/users/${owner?.id}`} />}>Ver perfil y comentarios</Button></section></div><RequestDialog listing={listing} open={open} onOpenChange={setOpen} /></>;
+  const { id } = useParams();
+  const { state } = useDemo();
+  const [open, setOpen] = useState(false);
+  const item = state.listings.find((candidate) => candidate.id === id);
+  const owner = state.users.find((user) => user.id === item?.ownerId);
+  if (!item)
+    return (
+      <EmptyState
+        title="Objeto no encontrado"
+        description="La publicación ya no está disponible."
+        action="Volver a explorar"
+        href="/explore"
+      />
+    );
+  return (
+    <>
+      <Link className="back-link" to="/explore">
+        <ArrowLeft />
+        Volver a explorar
+      </Link>
+      <div className="object-layout">
+        <section className="object-gallery">
+          <img src={item.image} alt={item.title} />
+          <div>
+            {item.media.slice(1, 3).map((media) => (
+              <img key={media.id} src={media.url} alt={media.name} />
+            ))}
+            {item.media.length < 2 && (
+              <div className="gallery-placeholder">
+                <Camera />
+                <span>Vista principal</span>
+              </div>
+            )}
+          </div>
+        </section>
+        <aside className="object-summary">
+          <div className="listing-meta">
+            <span>{item.category}</span>
+            <StatusBadge status={item.status} />
+          </div>
+          <h1>{item.title}</h1>
+          <div className="object-location">
+            <MapPin />
+            {item.campus} · {item.location}
+          </div>
+          <p>{item.description}</p>
+          <p>
+            <strong>Condición:</strong> {item.condition}
+          </p>
+          <div className="price-block">
+            <strong>{money(item.dailyRate)}</strong>
+            <span>por día</span>
+            <small>Garantía reembolsable: {money(item.guaranteeAmount)}</small>
+          </div>
+          <Button
+            size="lg"
+            onClick={() => setOpen(true)}
+            disabled={
+              item.ownerId === state.currentUserId || item.status !== 'ACTIVE'
+            }
+          >
+            Solicitar préstamo <ArrowRight />
+          </Button>
+          {item.ownerId === state.currentUserId && (
+            <p className="own-listing-note">
+              Este objeto te pertenece. Adminístralo desde Mis objetos.
+            </p>
+          )}
+        </aside>
+      </div>
+      <div className="detail-grid">
+        <section className="panel">
+          <span className="eyebrow">Disponibilidad</span>
+          <h2>Intervalos disponibles</h2>
+          <div className="availability-days">
+            {item.availabilitySlots
+              .filter((slot) => slot.status === 'AVAILABLE')
+              .slice(0, 6)
+              .map((slot) => (
+                <span key={slot.id}>
+                  <Check />
+                  {shortDate(slot.startAt)} – {shortDate(slot.endAt)}
+                </span>
+              ))}
+          </div>
+          {!item.availabilitySlots.some(
+            (slot) => slot.status === 'AVAILABLE',
+          ) && <p>No hay intervalos disponibles.</p>}
+          <p className="muted">
+            Los periodos reservados permanecen bloqueados.
+          </p>
+        </section>
+        <section className="panel">
+          <span className="eyebrow">Punto de intercambio</span>
+          <h2>{item.exchangePlace}</h2>
+          <p className="muted">
+            El teléfono de la contraparte se comparte únicamente durante una
+            reserva o préstamo vigente.
+          </p>
+        </section>
+        <section className="panel conditions-panel">
+          <span className="eyebrow">Condiciones actuales</span>
+          <h2>Acuerdos claros antes de solicitar</h2>
+          <dl>
+            <div>
+              <dt>Uso</dt>
+              <dd>{item.terms.usage}</dd>
+            </div>
+            <div>
+              <dt>Entrega</dt>
+              <dd>{item.terms.delivery}</dd>
+            </div>
+            <div>
+              <dt>Devolución</dt>
+              <dd>{item.terms.returnPolicy}</dd>
+            </div>
+            <div>
+              <dt>Cancelación</dt>
+              <dd>{item.terms.cancellation}</dd>
+            </div>
+          </dl>
+        </section>
+        <section className="panel owner-panel">
+          <span className="eyebrow">Prestamista</span>
+          <UserChip user={owner} detail />
+          <div className="owner-stats">
+            <span>
+              <Reputation
+                value={owner?.rating ?? 0}
+                count={owner?.ratingCount}
+              />{' '}
+              valoración
+            </span>
+            <span>
+              <ShieldCheck />
+              Identidad verificada
+            </span>
+          </div>
+          <Button
+            variant="outline"
+            render={<Link to={`/users/${owner?.id}`} />}
+          >
+            Ver perfil y comentarios
+          </Button>
+        </section>
+      </div>
+      <RequestDialog listingId={item.id} open={open} onOpenChange={setOpen} />
+    </>
+  );
 }
 
-function RequestDialog({ listing, open, onOpenChange }: { listing: ReturnType<typeof useDemo>['state']['listings'][number]; open: boolean; onOpenChange: (open: boolean) => void }) {
-  const { state, createRequest } = useDemo(); const navigate = useNavigate(); const [step, setStep] = useState(1); const [startAt, setStartAt] = useState('2026-09-28T09:00'); const [endAt, setEndAt] = useState('2026-09-30T18:00'); const [accepted, setAccepted] = useState(false); const owner = state.users.find((u) => u.id === listing.ownerId); const days = Math.max(1, Math.ceil((new Date(endAt).getTime() - new Date(startAt).getTime()) / 86400000));
-  const titles = ['Selecciona las fechas', 'Revisa la disponibilidad', 'Conoce al prestamista', 'Acepta las condiciones', 'Resumen económico'];
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="request-dialog"><DialogHeader><span className="dialog-step">Paso {step} de 5</span><DialogTitle>{titles[step - 1]}</DialogTitle><DialogDescription>Solicitud para {listing.title}</DialogDescription></DialogHeader><div className="step-progress">{[1,2,3,4,5].map((n) => <i key={n} className={n <= step ? 'active' : ''} />)}</div><div className="request-step">{step === 1 && <div className="date-fields"><label>Desde<input type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)} /></label><label>Hasta<input type="datetime-local" value={endAt} onChange={(e) => setEndAt(e.target.value)} /></label></div>}{step === 2 && <div className="success-box"><CheckCircle2 /><div><strong>Las fechas están disponibles</strong><p>El calendario no registra reservas para este periodo.</p></div></div>}{step === 3 && <div className="borrower-review"><UserChip user={owner} detail /><Reputation value={owner?.rating ?? 0} /><p>{owner?.completedLoans} préstamos completados · identidad verificada</p></div>}{step === 4 && <><div className="terms-review"><p><strong>Uso:</strong> {listing.terms.usage}</p><p><strong>Devolución:</strong> {listing.terms.returnPolicy}</p><p><strong>Cancelación:</strong> {listing.terms.cancellation}</p></div><label className="check-row"><input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} />He leído y acepto las condiciones.</label></>}{step === 5 && <div className="economic-summary"><div><span>{money(listing.dailyRate)} × {days} días</span><strong>{money(listing.dailyRate * days)}</strong></div><div><span>Comisión de servicio</span><strong>{money(Math.round(listing.dailyRate * days * .08))}</strong></div><div><span>Garantía retenida</span><strong>{money(listing.guaranteeAmount)}</strong></div><div className="total"><span>Total requerido</span><strong>{money(listing.dailyRate * days + Math.round(listing.dailyRate * days * .08) + listing.guaranteeAmount)}</strong></div></div>}</div><DialogFooter><Button variant="outline" onClick={() => step === 1 ? onOpenChange(false) : setStep(step - 1)}>{step === 1 ? 'Cancelar' : 'Atrás'}</Button><Button disabled={step === 4 && !accepted} onClick={() => { if (step < 5) setStep(step + 1); else { createRequest(listing.id, new Date(startAt).toISOString(), new Date(endAt).toISOString()); onOpenChange(false); navigate('/requests'); } }}>{step === 5 ? 'Enviar solicitud' : 'Continuar'} <ChevronRight /></Button></DialogFooter></DialogContent></Dialog>;
+function RequestDialog({
+  listingId,
+  open,
+  onOpenChange,
+}: {
+  listingId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { state, createRequest } = useDemo();
+  const navigate = useNavigate();
+  const item = state.listings.find((listing) => listing.id === listingId)!;
+  const [startAt, setStartAt] = useState('2026-10-15T09:00');
+  const [endAt, setEndAt] = useState('2026-10-17T18:00');
+  const [accepted, setAccepted] = useState(false);
+  const [error, setError] = useState('');
+  const available = Boolean(
+    startAt &&
+    endAt &&
+    new Date(endAt) > new Date(startAt) &&
+    isPeriodAvailable(item.availabilitySlots, startAt, endAt),
+  );
+  const breakdown = economicBreakdown({
+    dailyRate: item.dailyRate,
+    guaranteeAmount: item.guaranteeAmount,
+    startAt,
+    endAt,
+  });
+  const submit = () => {
+    if (!state.termsAccepted) {
+      onOpenChange(false);
+      navigate('/terms');
+      return;
+    }
+    if (!accepted) {
+      setError('Debes leer y aceptar las condiciones.');
+      return;
+    }
+    const result = createRequest(
+      item.id,
+      new Date(startAt).toISOString(),
+      new Date(endAt).toISOString(),
+    );
+    if (!result.ok) {
+      setError(result.message ?? 'No se pudo crear la solicitud.');
+      return;
+    }
+    onOpenChange(false);
+    navigate('/requests');
+  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="request-dialog">
+        <DialogHeader>
+          <DialogTitle>Revisa antes de solicitar</DialogTitle>
+          <DialogDescription>Solicitud para {item.title}</DialogDescription>
+        </DialogHeader>
+        <div className="date-fields">
+          <label>
+            Desde
+            <input
+              type="datetime-local"
+              value={startAt}
+              onChange={(event) => setStartAt(event.target.value)}
+            />
+          </label>
+          <label>
+            Hasta
+            <input
+              type="datetime-local"
+              value={endAt}
+              onChange={(event) => setEndAt(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className={available ? 'success-box' : 'warning-box'}>
+          <CheckCircle2 />
+          <p>
+            {available
+              ? 'El periodo está disponible.'
+              : 'Elige un periodo válido y disponible.'}
+          </p>
+        </div>
+        <div className="terms-review">
+          <p>
+            <strong>Uso:</strong> {item.terms.usage}
+          </p>
+          <p>
+            <strong>Entrega:</strong> {item.terms.delivery}
+          </p>
+          <p>
+            <strong>Devolución:</strong> {item.terms.returnPolicy}
+          </p>
+          <p>
+            <strong>Cancelación:</strong> {item.terms.cancellation}
+          </p>
+          <p>
+            <strong>Lugar:</strong> {item.exchangePlace}
+          </p>
+        </div>
+        <div className="economic-summary">
+          <div>
+            <span>Tarifa · {breakdown.days} días</span>
+            <strong>{money(breakdown.fee)}</strong>
+          </div>
+          <div>
+            <span>Comisión</span>
+            <strong>{money(breakdown.serviceFee)}</strong>
+          </div>
+          <div>
+            <span>Garantía</span>
+            <strong>{money(breakdown.guarantee)}</strong>
+          </div>
+          <div className="total">
+            <span>Total</span>
+            <strong>{money(breakdown.total)}</strong>
+          </div>
+        </div>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={accepted}
+            onChange={(event) => setAccepted(event.target.checked)}
+          />
+          He leído y acepto las condiciones.
+        </label>
+        {error && (
+          <p className="field-error" role="alert">
+            {error}
+          </p>
+        )}
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
+            Cancelar
+          </Button>
+          <Button type="button" disabled={!available} onClick={submit}>
+            Enviar solicitud
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export function MyItemsPage() {
-  const { state, toggleListing, archiveListing } = useDemo(); const items = state.listings.filter((l) => l.ownerId === state.currentUserId);
-  return <><PageHeader eyebrow="Como prestamista" title="Mis objetos" description="Publicaciones, disponibilidad y próximas reservas." action={<Button render={<Link to="/my-items/new" />}><Plus />Publicar objeto</Button>} />{items.length ? <div className="my-items-list">{items.map((item) => <article className="my-item-card" key={item.id}><img src={item.image} alt={item.title} /><div className="my-item-main"><div><StatusBadge status={item.status} /><h2>{item.title}</h2><p>{item.category} · {item.campus}</p></div><div className="my-item-numbers"><span><small>Tarifa</small><strong>{money(item.dailyRate)}/día</strong></span><span><small>Garantía</small><strong>{money(item.guaranteeAmount)}</strong></span><span><small>Solicitudes</small><strong>{state.requests.filter((r) => r.listingId === item.id && r.status === 'PENDING').length}</strong></span></div></div><div className="item-actions"><Button variant="outline" render={<Link to={`/my-items/${item.id}/edit`} />}><Edit3 />Editar</Button><Button variant="outline" render={<Link to={`/my-items/${item.id}/availability`} />}><CalendarDays />Disponibilidad</Button><Button variant="ghost" onClick={() => toggleListing(item.id)}><Pause />{item.status === 'ACTIVE' ? 'Pausar' : 'Reactivar'}</Button><Button variant="ghost" onClick={() => archiveListing(item.id)}><Trash2 />Archivar</Button></div></article>)}</div> : <EmptyState title="No tienes objetos publicados" description="Publica tu primer objeto para empezar a recibir solicitudes." action="Publicar mi primer objeto" href="/my-items/new" />}</>;
+  const { state, toggleListing, archiveListing } = useDemo();
+  const items = state.listings.filter(
+    (item) => item.ownerId === state.currentUserId,
+  );
+  return (
+    <>
+      <PageHeader
+        eyebrow="Como prestamista"
+        title="Mis objetos"
+        description="Publicaciones, disponibilidad y próximas reservas."
+        action={
+          <Button render={<Link to="/my-items/new" />}>
+            <Plus />
+            Publicar objeto
+          </Button>
+        }
+      />
+      {items.length ? (
+        <div className="my-items-list">
+          {items.map((item) => (
+            <article className="my-item-card" key={item.id}>
+              <img src={item.image} alt={item.title} />
+              <div className="my-item-main">
+                <div>
+                  <StatusBadge status={item.status} />
+                  <h2>{item.title}</h2>
+                  <p>
+                    {item.category} · {item.campus}
+                  </p>
+                </div>
+                <div className="my-item-numbers">
+                  <span>
+                    <small>Tarifa</small>
+                    <strong>{money(item.dailyRate)}/día</strong>
+                  </span>
+                  <span>
+                    <small>Garantía</small>
+                    <strong>{money(item.guaranteeAmount)}</strong>
+                  </span>
+                  <span>
+                    <small>Solicitudes</small>
+                    <strong>
+                      {
+                        state.requests.filter(
+                          (request) =>
+                            request.listingId === item.id &&
+                            request.status === 'PENDING',
+                        ).length
+                      }
+                    </strong>
+                  </span>
+                </div>
+              </div>
+              <div className="item-actions">
+                <Button
+                  variant="outline"
+                  render={<Link to={`/my-items/${item.id}/edit`} />}
+                >
+                  <Edit3 />
+                  Editar
+                </Button>
+                <Button
+                  variant="outline"
+                  render={<Link to={`/my-items/${item.id}/availability`} />}
+                >
+                  <CalendarDays />
+                  Disponibilidad
+                </Button>
+                {item.status !== 'ARCHIVED' && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => toggleListing(item.id)}
+                  >
+                    <Pause />
+                    {item.status === 'ACTIVE' ? 'Pausar' : 'Reactivar'}
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  onClick={() => archiveListing(item.id)}
+                  disabled={item.status === 'ARCHIVED'}
+                >
+                  <Trash2 />
+                  Archivar
+                </Button>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          title="No tienes objetos publicados"
+          description="Publica tu primer objeto para empezar a recibir solicitudes."
+          action="Publicar mi primer objeto"
+          href="/my-items/new"
+        />
+      )}
+    </>
+  );
 }
 
-const steps = ['Información', 'Fotografías', 'Ubicación', 'Disponibilidad', 'Condiciones', 'Economía', 'Resumen'];
+const listingSchema = z.object({
+  title: z.string().min(4, 'Ingresa un título'),
+  category: z.string().min(1),
+  description: z.string().min(20, 'Describe el objeto con más detalle'),
+  condition: z.string().min(1),
+  university: z.string().min(2),
+  campus: z.string().min(2),
+  location: z.string().min(2),
+  exchangePlace: z.string().min(5),
+  usage: z.string().min(5),
+  delivery: z.string().min(5),
+  returnPolicy: z.string().min(5),
+  cancellation: z.string().min(5),
+  dailyRate: z.number().min(0),
+  guaranteeAmount: z.number().min(0),
+});
+type ListingValues = z.infer<typeof listingSchema>;
 export function ListingFormPage({ edit = false }: { edit?: boolean }) {
-  const { id } = useParams(); const { state, addListing } = useDemo(); const navigate = useNavigate(); const existing = state.listings.find((l) => l.id === id); const [step, setStep] = useState(1); const [form, setForm] = useState({ title: existing?.title ?? '', category: existing?.category ?? 'Calculadoras', description: existing?.description ?? '', condition: existing?.condition ?? 'Muy buena', university: existing?.university ?? 'UPC', campus: existing?.campus ?? 'Monterrico', location: existing?.location ?? 'Santiago de Surco', exchangePlace: existing?.exchangePlace ?? 'Hall principal del campus', dailyRate: existing?.dailyRate ?? 10, guaranteeAmount: existing?.guaranteeAmount ?? 80, usage: existing?.terms.usage ?? 'Uso académico responsable.', delivery: existing?.terms.delivery ?? 'Entrega presencial con revisión conjunta.', returnPolicy: existing?.terms.returnPolicy ?? 'Devolver en el mismo estado.', cancellation: existing?.terms.cancellation ?? 'Cancelación permitida antes de la recepción.' });
-  const update = (key: keyof typeof form, value: string | number) => setForm((current) => ({ ...current, [key]: value }));
-  const save = () => { if (edit) { navigate('/my-items'); return; } const newId = addListing({ ...form, image: state.listings[1].image, availability: ['1 oct','2 oct','3 oct'], terms: { usage: form.usage, delivery: form.delivery, returnPolicy: form.returnPolicy, cancellation: form.cancellation } }); navigate(`/objects/${newId}`); };
-  return <><PageHeader eyebrow={edit ? 'Administrar publicación' : 'Nueva publicación'} title={edit ? `Editar ${existing?.title ?? 'objeto'}` : 'Publicar un objeto'} description="Completa cada paso. Podrás revisar todo antes de publicar." />{edit && <div className="info-banner"><ShieldCheck /><p><strong>Las reservas confirmadas no cambiarán.</strong> Los cambios se aplicarán únicamente a futuras solicitudes; las condiciones previamente aceptadas permanecerán congeladas.</p></div>}<div className="form-layout"><aside className="form-steps">{steps.map((label, index) => <button key={label} className={index + 1 === step ? 'active' : index + 1 < step ? 'done' : ''} onClick={() => setStep(index + 1)}><span>{index + 1 < step ? <Check /> : index + 1}</span>{label}</button>)}</aside><section className="panel listing-form"><div className="form-heading"><span className="eyebrow">Paso {step} de 7</span><h2>{steps[step - 1]}</h2></div>{step === 1 && <div className="field-grid"><Field label="Título"><input value={form.title} onChange={(e) => update('title', e.target.value)} placeholder="Ej. Calculadora Casio ClassWiz" /></Field><Field label="Categoría"><select value={form.category} onChange={(e) => update('category', e.target.value)}><option>Calculadoras</option><option>Cámaras</option><option>Libros</option><option>Herramientas</option><option>Electrónica</option></select></Field><Field label="Descripción" wide><textarea value={form.description} onChange={(e) => update('description', e.target.value)} rows={5} /></Field><Field label="Condición"><select value={form.condition} onChange={(e) => update('condition', e.target.value)}><option>Excelente</option><option>Muy buena</option><option>Buena</option></select></Field></div>}{step === 2 && <div className="upload-zone"><ImagePlus /><h3>Agrega fotografías claras</h3><p>Incluye vistas generales, accesorios y cualquier detalle relevante.</p><Button variant="outline"><Upload />Seleccionar archivos</Button><div className="mock-thumbnails"><img src={existing?.image ?? state.listings[1].image} alt="Vista previa" /><span><Plus />Agregar</span></div></div>}{step === 3 && <div className="field-grid"><Field label="Universidad"><select value={form.university} onChange={(e) => update('university', e.target.value)}><option>UPC</option><option>PUCP</option><option>UNI</option><option>UNMSM</option></select></Field><Field label="Campus"><input value={form.campus} onChange={(e) => update('campus', e.target.value)} /></Field><Field label="Distrito"><input value={form.location} onChange={(e) => update('location', e.target.value)} /></Field><Field label="Lugar de intercambio"><input value={form.exchangePlace} onChange={(e) => update('exchangePlace', e.target.value)} /></Field></div>}{step === 4 && <AvailabilityEditor compact />}{step === 5 && <div className="field-grid single"><Field label="Condiciones de uso"><textarea value={form.usage} onChange={(e) => update('usage', e.target.value)} /></Field><Field label="Condiciones de entrega"><textarea value={form.delivery} onChange={(e) => update('delivery', e.target.value)} /></Field><Field label="Condiciones de devolución"><textarea value={form.returnPolicy} onChange={(e) => update('returnPolicy', e.target.value)} /></Field><Field label="Condiciones de cancelación"><textarea value={form.cancellation} onChange={(e) => update('cancellation', e.target.value)} /></Field></div>}{step === 6 && <div className="economy-fields"><Field label="Tarifa diaria (S/)"><input type="number" value={form.dailyRate} onChange={(e) => update('dailyRate', Number(e.target.value))} /></Field><Field label="Garantía monetaria (S/)"><input type="number" value={form.guaranteeAmount} onChange={(e) => update('guaranteeAmount', Number(e.target.value))} /></Field><div className="info-banner"><ShieldCheck /><p>La garantía se muestra y gestiona por separado de la tarifa del préstamo.</p></div></div>}{step === 7 && <div className="publish-summary"><img src={existing?.image ?? state.listings[1].image} alt="Resumen" /><div><span className="eyebrow">Listo para publicar</span><h2>{form.title || 'Tu nuevo objeto'}</h2><p>{form.description || 'Agrega una descripción antes de publicar.'}</p><dl><div><dt>Tarifa</dt><dd>{money(form.dailyRate)} / día</dd></div><div><dt>Garantía</dt><dd>{money(form.guaranteeAmount)}</dd></div><div><dt>Intercambio</dt><dd>{form.exchangePlace}</dd></div></dl></div></div>}<footer className="form-footer"><Button variant="outline" disabled={step === 1} onClick={() => setStep(step - 1)}><ArrowLeft />Atrás</Button><Button onClick={() => step === 7 ? save() : setStep(step + 1)}>{step === 7 ? edit ? 'Guardar cambios' : 'Publicar objeto' : 'Continuar'}<ArrowRight /></Button></footer></section></div></>;
+  const { id } = useParams();
+  const { state, addListing, updateListing } = useDemo();
+  const navigate = useNavigate();
+  const existing = state.listings.find((item) => item.id === id);
+  const [media, setMedia] = useState<ListingMedia[]>(existing?.media ?? []);
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<ListingValues>({
+    resolver: zodResolver(listingSchema),
+    defaultValues: existing
+      ? { ...existing, ...existing.terms }
+      : {
+          category: 'Calculadoras',
+          condition: 'Muy buena',
+          university:
+            state.users.find((u) => u.id === state.currentUserId)?.university ??
+            'UPC',
+          campus:
+            state.users.find((u) => u.id === state.currentUserId)?.campus ?? '',
+          usage: 'Uso académico responsable.',
+          delivery: 'Entrega presencial con revisión conjunta.',
+          returnPolicy: 'Devolver en el mismo estado.',
+          cancellation:
+            'Cancelación permitida antes de confirmar la recepción.',
+          dailyRate: 10,
+          guaranteeAmount: 80,
+        },
+  });
+  if (edit && !existing)
+    return (
+      <EmptyState
+        title="Objeto no encontrado"
+        description="No puedes editar esta publicación."
+        href="/my-items"
+        action="Volver"
+      />
+    );
+  const addMedia = (files: FileList | null) => {
+    if (!files) return;
+    setMedia((current) => [
+      ...current,
+      ...Array.from(files).map((file) => ({
+        id: `media-${Date.now()}-${file.name}`,
+        type: file.type.startsWith('video/')
+          ? ('VIDEO' as const)
+          : ('PHOTO' as const),
+        url: URL.createObjectURL(file),
+        name: file.name,
+      })),
+    ]);
+  };
+  const submit = (values: ListingValues) => {
+    const image =
+      media.find((item) => item.type === 'PHOTO')?.url ??
+      existing?.image ??
+      '/images/calculator.webp';
+    const payload = {
+      title: values.title,
+      category: values.category,
+      description: values.description,
+      condition: values.condition,
+      university: values.university,
+      campus: values.campus,
+      location: values.location,
+      exchangePlace: values.exchangePlace,
+      dailyRate: values.dailyRate,
+      guaranteeAmount: values.guaranteeAmount,
+      image,
+      media: media.length
+        ? media
+        : [
+            {
+              id: `media-${Date.now()}`,
+              type: 'PHOTO' as const,
+              url: image,
+              name: values.title,
+            },
+          ],
+      availability: existing?.availability ?? [],
+      availabilitySlots: existing?.availabilitySlots ?? [],
+      terms: {
+        usage: values.usage,
+        delivery: values.delivery,
+        returnPolicy: values.returnPolicy,
+        cancellation: values.cancellation,
+      },
+    };
+    if (existing) {
+      updateListing(existing.id, payload);
+      navigate('/my-items');
+    } else {
+      const newId = addListing(payload);
+      navigate(`/my-items/${newId}/availability`);
+    }
+  };
+  return (
+    <>
+      <PageHeader
+        eyebrow={edit ? 'Administrar publicación' : 'Nueva publicación'}
+        title={edit ? `Editar ${existing?.title}` : 'Publicar un objeto'}
+        description="Completa la información, fotos, condiciones y economía."
+      />
+      {edit && (
+        <div className="info-banner">
+          <ShieldCheck />
+          <p>
+            <strong>Las reservas confirmadas no cambiarán.</strong> Las
+            condiciones congeladas permanecen inmutables.
+          </p>
+        </div>
+      )}
+      <form className="panel listing-form" onSubmit={handleSubmit(submit)}>
+        <section>
+          <h2>Información y ubicación</h2>
+          <div className="field-grid">
+            <Field label="Título" error={errors.title?.message}>
+              <input {...register('title')} />
+            </Field>
+            <Field label="Categoría" error={errors.category?.message}>
+              <select {...register('category')}>
+                <option>Calculadoras</option>
+                <option>Cámaras</option>
+                <option>Libros</option>
+                <option>Herramientas</option>
+                <option>Electrónica</option>
+              </select>
+            </Field>
+            <Field label="Descripción" error={errors.description?.message} wide>
+              <textarea rows={4} {...register('description')} />
+            </Field>
+            <Field label="Condición">
+              <select {...register('condition')}>
+                <option>Excelente</option>
+                <option>Muy buena</option>
+                <option>Buena</option>
+              </select>
+            </Field>
+            <Field label="Universidad">
+              <select {...register('university')}>
+                <option>UPC</option>
+                <option>PUCP</option>
+                <option>UNI</option>
+                <option>UNMSM</option>
+              </select>
+            </Field>
+            <Field label="Campus">
+              <input {...register('campus')} />
+            </Field>
+            <Field label="Distrito">
+              <input {...register('location')} />
+            </Field>
+            <Field label="Lugar de intercambio">
+              <input {...register('exchangePlace')} />
+            </Field>
+          </div>
+        </section>
+        <section>
+          <h2>Fotografías</h2>
+          <label className="upload-zone" htmlFor="listing-media">
+            <ImagePlus />
+            <strong>Agrega fotos claras</strong>
+            <span>
+              Incluye vistas generales, accesorios y cualquier detalle
+              relevante.
+            </span>
+            <span className="button-like">
+              <Upload />
+              Seleccionar archivos
+            </span>
+          </label>
+          <input
+            id="listing-media"
+            className="sr-only"
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(event) => addMedia(event.target.files)}
+          />
+          <div className="media-previews">
+            {media.map((item) => (
+              <article key={item.id}>
+                <img src={item.url} alt={item.name} />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Eliminar ${item.name}`}
+                  onClick={() =>
+                    setMedia((current) =>
+                      current.filter((candidate) => candidate.id !== item.id),
+                    )
+                  }
+                >
+                  <X />
+                </Button>
+              </article>
+            ))}
+          </div>
+        </section>
+        <section>
+          <h2>Condiciones</h2>
+          <div className="field-grid single">
+            <Field label="Condiciones de uso">
+              <textarea {...register('usage')} />
+            </Field>
+            <Field label="Condiciones de entrega">
+              <textarea {...register('delivery')} />
+            </Field>
+            <Field label="Condiciones de devolución">
+              <textarea {...register('returnPolicy')} />
+            </Field>
+            <Field label="Condiciones de cancelación">
+              <textarea {...register('cancellation')} />
+            </Field>
+          </div>
+        </section>
+        <section>
+          <h2>Economía</h2>
+          <div className="field-grid">
+            <Field label="Tarifa diaria (S/)" error={errors.dailyRate?.message}>
+              <input
+                type="number"
+                step="0.01"
+                {...register('dailyRate', { valueAsNumber: true })}
+              />
+            </Field>
+            <Field
+              label="Garantía monetaria (S/)"
+              error={errors.guaranteeAmount?.message}
+            >
+              <input
+                type="number"
+                step="0.01"
+                {...register('guaranteeAmount', { valueAsNumber: true })}
+              />
+            </Field>
+          </div>
+        </section>
+        <div className="form-footer">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => navigate('/my-items')}
+          >
+            Cancelar
+          </Button>
+          <Button type="submit" disabled={isSubmitting || !media.length}>
+            {edit ? 'Guardar cambios' : 'Guardar y definir disponibilidad'}
+          </Button>
+        </div>
+      </form>
+    </>
+  );
 }
 
-export function AvailabilityPage() { const { id } = useParams(); const { state } = useDemo(); const listing = state.listings.find((l) => l.id === id); return <><PageHeader eyebrow="Disponibilidad" title={listing?.title ?? 'Calendario del objeto'} description="Selecciona días disponibles. Los periodos reservados permanecen bloqueados." action={<Button>Guardar disponibilidad</Button>} /><section className="panel"><AvailabilityEditor /><div className="availability-legend"><span><i className="available" />Disponible</span><span><i className="unavailable" />No disponible</span><span><i className="reserved" />Reservado</span></div></section></>; }
-function AvailabilityEditor({ compact = false }: { compact?: boolean }) { const [selected, setSelected] = useState([1,2,3,7,8,9,13,14,15,16,20,21,22]); const reserved = [4,5,10,11,12]; return <div className={`availability-editor ${compact ? 'compact' : ''}`}><div className="availability-head"><Button variant="outline" size="icon"><ArrowLeft /></Button><strong>Octubre 2026</strong><Button variant="outline" size="icon"><ArrowRight /></Button></div><div className="availability-grid"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span>{Array.from({ length: 31 }, (_, i) => i + 1).map((day) => <button type="button" key={day} disabled={reserved.includes(day)} className={reserved.includes(day) ? 'reserved' : selected.includes(day) ? 'selected' : ''} onClick={() => setSelected((current) => current.includes(day) ? current.filter((value) => value !== day) : [...current, day])}>{day}</button>)}</div></div>; }
-function Field({ label, children, wide = false }: { label: string; children: React.ReactNode; wide?: boolean }) { return <label className={`field ${wide ? 'wide' : ''}`}><span>{label}</span>{children}</label>; }
+export function AvailabilityPage() {
+  const { id } = useParams();
+  const { state, saveAvailability } = useDemo();
+  const item = state.listings.find((candidate) => candidate.id === id);
+  const [slots, setSlots] = useState<AvailabilitySlot[]>(
+    item?.availabilitySlots.filter((slot) => slot.status === 'AVAILABLE') ?? [],
+  );
+  const [startAt, setStartAt] = useState('2026-10-20T09:00');
+  const [endAt, setEndAt] = useState('2026-10-20T18:00');
+  const [message, setMessage] = useState('');
+  if (!item)
+    return (
+      <EmptyState
+        title="Objeto no encontrado"
+        description="No existe esta publicación."
+      />
+    );
+  const reserved = item.availabilitySlots.filter(
+    (slot) => slot.status === 'RESERVED',
+  );
+  const add = () => {
+    if (new Date(endAt) <= new Date(startAt)) {
+      setMessage('La hora final debe ser posterior a la inicial.');
+      return;
+    }
+    setSlots((current) => [
+      ...current,
+      {
+        id: `slot-${Date.now()}`,
+        startAt: new Date(startAt).toISOString(),
+        endAt: new Date(endAt).toISOString(),
+        status: 'AVAILABLE',
+      },
+    ]);
+    setMessage('');
+  };
+  return (
+    <>
+      <PageHeader
+        eyebrow="Disponibilidad"
+        title={item.title}
+        description="Agrega intervalos. Los periodos reservados permanecen bloqueados."
+        action={
+          <Button
+            type="button"
+            onClick={() => {
+              saveAvailability(item.id, slots);
+              setMessage('Disponibilidad guardada.');
+            }}
+          >
+            Guardar disponibilidad
+          </Button>
+        }
+      />
+      <section className="panel">
+        <div className="date-fields">
+          <label>
+            Inicio
+            <input
+              type="datetime-local"
+              value={startAt}
+              onChange={(event) => setStartAt(event.target.value)}
+            />
+          </label>
+          <label>
+            Fin
+            <input
+              type="datetime-local"
+              value={endAt}
+              onChange={(event) => setEndAt(event.target.value)}
+            />
+          </label>
+          <Button type="button" variant="outline" onClick={add}>
+            <Plus />
+            Agregar intervalo
+          </Button>
+        </div>
+        {message && (
+          <output
+            className={
+              message.includes('guardada') ? 'success-text' : 'field-error'
+            }
+          >
+            {message}
+          </output>
+        )}
+        <div className="slot-list">
+          <h2>Intervalos editables</h2>
+          {slots.length ? (
+            slots.map((slot) => (
+              <article key={slot.id}>
+                <span>
+                  <Check />
+                  {shortDate(slot.startAt)} – {shortDate(slot.endAt)}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Eliminar intervalo"
+                  onClick={() =>
+                    setSlots((current) =>
+                      current.filter((candidate) => candidate.id !== slot.id),
+                    )
+                  }
+                >
+                  <Trash2 />
+                </Button>
+              </article>
+            ))
+          ) : (
+            <p>No agregaste intervalos disponibles.</p>
+          )}
+          <h2>Periodos reservados</h2>
+          {reserved.length ? (
+            reserved.map((slot) => (
+              <article key={slot.id} className="reserved">
+                <span>
+                  <ShieldCheck />
+                  {shortDate(slot.startAt)} – {shortDate(slot.endAt)}
+                </span>
+                <StatusBadge status="CONFIRMED" />
+              </article>
+            ))
+          ) : (
+            <p>No hay reservas que bloqueen el calendario.</p>
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function Field({
+  label,
+  error,
+  children,
+  wide = false,
+}: {
+  label: string;
+  error?: string;
+  children: React.ReactNode;
+  wide?: boolean;
+}) {
+  return (
+    <label className={`field ${wide ? 'wide' : ''}`}>
+      <span>{label}</span>
+      {children}
+      {error && (
+        <small className="field-error" role="alert">
+          {error}
+        </small>
+      )}
+    </label>
+  );
+}
