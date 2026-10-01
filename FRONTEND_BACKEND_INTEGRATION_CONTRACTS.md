@@ -1,6 +1,21 @@
 # Contratos requeridos por el frontend para integración backend
 
-Este documento describe capacidades y datos requeridos; no prescribe rutas HTTP. Todos los resultados deben incluir identificador estable, timestamps ISO 8601, estado de dominio y un error tipado cuando corresponda. El backend debe autorizar nuevamente cada operación aunque la UI ya aplique guards.
+Este documento describe las capacidades y datos que el frontend necesita del backend. Todas las llamadas pasan por el API Gateway (`VITE_API_GATEWAY_URL`, R14) con un token Bearer de Firebase Auth (R18). Todos los resultados deben incluir identificador estable, timestamps ISO 8601, estado de dominio y un error tipado cuando corresponda. El backend debe autorizar nuevamente cada operación aunque la UI ya aplique guards.
+
+## Endpoints (tabla 37 del informe)
+
+Definidos en `services/api/endpoints.ts` y consumidos con `gatewayRequest` (`services/api/http-client.ts`).
+
+| Contexto                 | Endpoint                                                                                                                                                                                            | Operaciones del frontend                                                                                |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Identidad                | `POST /estudiantes`, `GET/PUT /estudiantes/me`, `POST /estudiantes/me/verificacion`, `POST /estudiantes/me/aceptacion-terminos`                                                                     | `registerStudent`, `updateProfile`, `resendVerification`, `acceptTerms`                                 |
+| Catálogo                 | `POST /objetos`, `PUT /objetos/{id}`, `PATCH /objetos/{id}/estado`, `PUT /objetos/{id}/disponibilidad`, `GET /objetos`, `GET /objetos/{id}`                                                         | `createListing`, `updateListing`, pausar/archivar, `replaceAvailability`, búsqueda y detalle            |
+| Reservas                 | `POST /solicitudes`, `POST /solicitudes/{id}/aceptacion`, `POST /solicitudes/{id}/rechazo`, `GET /reservas`, `POST /reservas/{id}/cancelacion`, `GET /reservas/{id}/contacto`                       | `createLoanRequest`, `acceptLoanRequest`, `reject/cancelLoanRequest`, `cancelReservation`, contacto     |
+| Préstamos                | `POST /prestamos/{id}/entrega`, `/recepcion`, `/extensiones`, `/extensiones/{extId}/respuesta`, `/reprogramaciones`, `/devolucion`, `/confirmacion-devolucion`, `GET /prestamos`, `GET /calendario` | `recordDelivery`, `confirmReceipt`, extensiones, reprogramaciones, devolución, calendario               |
+| Evidencias e incidencias | `POST /prestamos/{id}/evidencias`, `POST /prestamos/{id}/analisis-evidencias`, `POST /incidencias`, `GET /incidencias/{id}`, `GET /admin/incidencias`, `POST /admin/incidencias/{id}/resolucion`    | evidencias (Cloudinary), análisis (Gemini), incidencias y bandeja admin                                 |
+| Pagos y garantías        | `GET /medios-pago`, `POST /pagos`, `POST /garantias`, `GET /prestamos/{id}/transacciones`                                                                                                           | `getPaymentMethods`, `payRentalFee`, `holdGuarantee`, `payExtension`, `listTransactions` (Mercado Pago) |
+| Reputación               | `POST /prestamos/{id}/calificaciones`, `GET /estudiantes/{id}/reputacion`                                                                                                                           | `submitRating`, perfil público                                                                          |
+| Notificaciones           | `GET /notificaciones`, `PATCH /notificaciones/{id}`                                                                                                                                                 | `listNotifications`, `markRead`                                                                         |
 
 ## Convenciones comunes
 

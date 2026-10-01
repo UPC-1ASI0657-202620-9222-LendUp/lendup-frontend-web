@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { startTransition, useState } from 'react';
 import {
   Link,
   NavLink,
@@ -9,6 +9,7 @@ import {
   useNavigate,
 } from 'react-router-dom';
 import {
+  AlertTriangle,
   Bell,
   CalendarDays,
   ChevronDown,
@@ -16,6 +17,7 @@ import {
   ClipboardList,
   Home,
   LayoutGrid,
+  LogOut,
   Menu,
   Package,
   RefreshCcw,
@@ -24,6 +26,7 @@ import {
   ShieldCheck,
   UserRound,
   UsersRound,
+  type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,213 +36,320 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { Brand } from '@/components/lendup/Brand';
+import { LanguageSwitcher } from '@/components/lendup/LanguageSwitcher';
+import { Avatar } from '@/components/lendup/shared';
+import { appConfig } from '@/config/app-config';
+import { useI18n, type MessageKey } from '@/lib/i18n';
+import { findUniversity } from '@/services/catalog.service';
 import { useDemo } from '@/stores/demo-store';
-import { DEMO_MODE } from '@/lib/demo-config';
+import { currentUserOf, termsAcceptedBy } from '@/stores/selectors';
+import type { Role } from '@/types/domain';
 
-const nav = [
-  { to: '/app', label: 'Inicio', icon: Home },
-  { to: '/explore', label: 'Explorar', icon: Search },
-  { to: '/my-items', label: 'Mis objetos', icon: Package },
-  { to: '/requests', label: 'Solicitudes', icon: ClipboardList },
-  { to: '/reservations', label: 'Reservas', icon: LayoutGrid },
-  { to: '/loans', label: 'Préstamos', icon: UsersRound },
-  { to: '/calendar', label: 'Calendario', icon: CalendarDays },
-  { to: '/transactions', label: 'Transacciones', icon: CircleDollarSign },
-  { to: '/incidents', label: 'Incidencias', icon: ShieldAlert },
-  { to: '/notifications', label: 'Notificaciones', icon: Bell },
-  { to: '/profile', label: 'Perfil', icon: UserRound },
-];
+interface NavItem {
+  to: string;
+  label: MessageKey;
+  icon: LucideIcon;
+}
+interface NavGroup {
+  label: MessageKey;
+  items: NavItem[];
+}
+
+const navigation: Record<Role, NavGroup[]> = {
+  STUDENT: [
+    {
+      label: 'nav.groups.main',
+      items: [
+        { to: '/app', label: 'nav.home', icon: Home },
+        { to: '/explore', label: 'nav.explore', icon: Search },
+        { to: '/my-items', label: 'nav.myItems', icon: Package },
+      ],
+    },
+    {
+      label: 'nav.groups.operations',
+      items: [
+        { to: '/requests', label: 'nav.requests', icon: ClipboardList },
+        { to: '/reservations', label: 'nav.reservations', icon: LayoutGrid },
+        { to: '/loans', label: 'nav.loans', icon: UsersRound },
+        { to: '/calendar', label: 'nav.calendar', icon: CalendarDays },
+      ],
+    },
+    {
+      label: 'nav.groups.account',
+      items: [
+        {
+          to: '/transactions',
+          label: 'nav.transactions',
+          icon: CircleDollarSign,
+        },
+        { to: '/incidents', label: 'nav.incidents', icon: ShieldAlert },
+        { to: '/notifications', label: 'nav.notifications', icon: Bell },
+        { to: '/profile', label: 'nav.profile', icon: UserRound },
+      ],
+    },
+  ],
+  ADMIN: [
+    {
+      label: 'nav.groups.admin',
+      items: [
+        { to: '/app', label: 'nav.home', icon: Home },
+        {
+          to: '/admin/incidents',
+          label: 'nav.adminIncidents',
+          icon: ShieldCheck,
+        },
+        { to: '/notifications', label: 'nav.notifications', icon: Bell },
+        { to: '/profile', label: 'nav.profile', icon: UserRound },
+      ],
+    },
+  ],
+};
+
+const mobilePrimary: Record<Role, string[]> = {
+  STUDENT: ['/app', '/explore', '/loans', '/notifications'],
+  ADMIN: ['/app', '/admin/incidents', '/notifications'],
+};
 
 export function AppShell() {
   const { state, switchUser, resetDemo, logout } = useDemo();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const current = state.users.find((user) => user.id === state.currentUserId)!;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const current = currentUserOf(state);
+  if (!current) return null;
+  const demoAccounts = state.users.filter(
+    (user) => user.accountStatus === 'ACTIVE',
+  );
+
+  const groups = navigation[current.role];
+  const items = groups.flatMap((group) => group.items);
   const unread = state.notifications.filter(
     (item) => item.userId === current.id && !item.read,
   ).length;
-  const visibleNav =
-    current.role === 'ADMIN'
-      ? nav.filter((item) =>
-          ['/app', '/notifications', '/profile'].includes(item.to),
-        )
-      : nav;
-  const mobilePrimaryNav =
-    current.role === 'ADMIN'
-      ? visibleNav.slice(0, 2)
-      : visibleNav
-          .slice(0, 2)
-          .concat(visibleNav.slice(5, 6), visibleNav.slice(9, 10));
-  const showDemoControls = DEMO_MODE;
+  const university = findUniversity(current.universityId);
+  const needsVerification = current.role === 'STUDENT' && !current.verified;
+  const needsTerms =
+    current.role === 'STUDENT' && !termsAcceptedBy(state, current.id);
+
+  const renderLink = (
+    { to, label, icon: Icon }: NavItem,
+    onClick?: () => void,
+  ) => (
+    <NavLink
+      key={to}
+      to={to}
+      end={to === '/app'}
+      onClick={onClick}
+      className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
+    >
+      <Icon aria-hidden="true" />
+      <span>{t(label)}</span>
+      {to === '/notifications' && unread > 0 && (
+        <span
+          className="nav-count"
+          aria-label={t('nav.unreadCount', { count: unread })}
+        >
+          {unread}
+        </span>
+      )}
+    </NavLink>
+  );
+
+  const changeUser = (id: string) =>
+    startTransition(() => {
+      switchUser(id);
+      navigate('/app');
+    });
+
+  const signOut = () => {
+    logout();
+    navigate('/login');
+  };
+
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        {t('common.skipToContent')}
+      </a>
       <aside className="sidebar">
-        <Link to="/app" className="brand">
-          <span className="brand-mark">
-            <ShieldCheck />
-          </span>
-          <span>LendUp</span>
-        </Link>
-        <nav aria-label="Navegación principal">
-          {visibleNav.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                isActive ? 'nav-link active' : 'nav-link'
-              }
-            >
-              <Icon />
-              {label}
-              {label === 'Notificaciones' && unread > 0 && (
-                <span className="nav-count">{unread}</span>
-              )}
-            </NavLink>
+        <Brand to="/app" tone="light" label={t('nav.brandHome')} />
+        <nav aria-label={t('nav.main')}>
+          {groups.map((group) => (
+            <div className="nav-group" key={group.label}>
+              <p className="nav-group-label">{t(group.label)}</p>
+              {group.items.map((item) => renderLink(item))}
+            </div>
           ))}
-          {current.role === 'ADMIN' && (
-            <NavLink
-              to="/admin/incidents"
-              className={({ isActive }) =>
-                isActive ? 'nav-link active' : 'nav-link'
-              }
-            >
-              <ShieldCheck />
-              Administración
-            </NavLink>
-          )}
         </nav>
-        {showDemoControls && (
+        {appConfig.demoMode && (
           <div className="demo-panel">
-            <p>Entorno demo</p>
-            <label htmlFor="demo-user">Ver como</label>
+            <p className="nav-group-label">{t('demo.title')}</p>
+            <label htmlFor="demo-user">{t('demo.viewAs')}</label>
             <div className="select-wrap">
               <select
                 id="demo-user"
                 value={current.id}
-                onChange={(event) => {
-                  switchUser(event.target.value);
-                  navigate(
-                    event.target.value === 'admin'
-                      ? '/admin/incidents'
-                      : '/app',
-                  );
-                }}
+                onChange={(event) => changeUser(event.target.value)}
               >
-                <option value="alexandra">Alexandra · prestataria</option>
-                <option value="carlos">Carlos · prestamista</option>
-                <option value="admin">Administrador LendUp</option>
+                {demoAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name} · {t(`roles.${account.role}`)}
+                  </option>
+                ))}
               </select>
-              <ChevronDown />
+              <ChevronDown aria-hidden="true" />
             </div>
             <button type="button" onClick={resetDemo}>
-              <RefreshCcw />
-              Restablecer demo
+              <RefreshCcw aria-hidden="true" />
+              {t('demo.reset')}
             </button>
           </div>
         )}
       </aside>
       <div className="app-main">
         <header className="topbar">
-          <Link to="/app" className="mobile-brand">
-            <span className="brand-mark">
-              <ShieldCheck />
-            </span>
-            LendUp
-          </Link>
-          <div className="top-search">
-            <Search />
-            <input
-              aria-label="Buscar en LendUp"
-              placeholder="Buscar objetos, préstamos…"
-              onKeyDown={(event) => {
-                if (event.key === 'Enter')
-                  navigate(
-                    `/explore?q=${encodeURIComponent(event.currentTarget.value)}`,
-                  );
-              }}
-            />
-          </div>
+          <Brand to="/app" label={t('nav.brandHome')} />
+          {current.role === 'STUDENT' && (
+            <search className="top-search">
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  navigate(`/explore?q=${encodeURIComponent(query.trim())}`);
+                }}
+              >
+                <Search aria-hidden="true" />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  aria-label={t('nav.searchLabel')}
+                  placeholder={t('nav.searchPlaceholder')}
+                />
+              </form>
+            </search>
+          )}
           <div className="top-actions">
-            <Button
-              variant="ghost"
-              size="icon"
-              render={<Link to="/notifications" />}
-              aria-label={`${unread} notificaciones`}
+            <LanguageSwitcher />
+            <Link
+              to="/notifications"
+              className="icon-button"
+              aria-label={t('nav.notificationsWithCount', { count: unread })}
             >
-              <Bell />
+              <Bell aria-hidden="true" />
               {unread > 0 && (
                 <span className="notification-count">{unread}</span>
               )}
-            </Button>
+            </Link>
             <Link to="/profile" className="header-user">
-              {current.avatar ? (
-                <img className="avatar" src={current.avatar} alt="" />
-              ) : (
-                <span className="avatar">{current.initials}</span>
-              )}
+              <Avatar user={current} />
               <span>
                 <strong>{current.firstName}</strong>
-                <small>{current.university}</small>
+                <small>
+                  {university?.shortName ?? t(`roles.${current.role}`)}
+                </small>
               </span>
             </Link>
-            <Button
+            <button
               type="button"
-              variant="ghost"
-              onClick={() => {
-                logout();
-                navigate('/login');
-              }}
+              className="icon-button"
+              onClick={signOut}
+              aria-label={t('nav.signOut')}
             >
-              Salir
-            </Button>
+              <LogOut aria-hidden="true" />
+            </button>
           </div>
         </header>
-        <main className="content" key={location.pathname}>
+        <main
+          id="main-content"
+          className="content"
+          key={location.pathname}
+          tabIndex={-1}
+        >
+          {needsVerification && (
+            <div className="app-banner warning">
+              <AlertTriangle aria-hidden="true" />
+              <p>{t('banners.verification')}</p>
+              <Button
+                size="sm"
+                variant="outline"
+                render={<Link to="/verify-email" />}
+              >
+                {t('banners.verificationAction')}
+              </Button>
+            </div>
+          )}
+          {!needsVerification && needsTerms && (
+            <div className="app-banner info">
+              <ShieldCheck aria-hidden="true" />
+              <p>{t('banners.terms')}</p>
+              <Button size="sm" variant="outline" render={<Link to="/terms" />}>
+                {t('banners.termsAction')}
+              </Button>
+            </div>
+          )}
           <Outlet />
         </main>
       </div>
-      <nav className="mobile-nav" aria-label="Navegación móvil">
-        {mobilePrimaryNav.map(({ to, label, icon: Icon }) => (
-          <NavLink key={to} to={to}>
-            <Icon />
-            <span>{label}</span>
-          </NavLink>
-        ))}
-        <button type="button" onClick={() => setMobileMenuOpen(true)}>
-          <Menu />
-          <span>Menú</span>
+      <nav className="mobile-nav" aria-label={t('nav.mobile')}>
+        {items
+          .filter((item) => mobilePrimary[current.role].includes(item.to))
+          .map(({ to, label, icon: Icon }) => (
+            <NavLink key={to} to={to} end={to === '/app'}>
+              <Icon aria-hidden="true" />
+              <span>{t(label)}</span>
+              {to === '/notifications' && unread > 0 && (
+                <span className="mobile-count">{unread}</span>
+              )}
+            </NavLink>
+          ))}
+        <button
+          type="button"
+          onClick={() => setMenuOpen(true)}
+          aria-expanded={menuOpen}
+        >
+          <Menu aria-hidden="true" />
+          <span>{t('nav.menu')}</span>
         </button>
       </nav>
-      <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-        <SheetContent side="bottom" className="mobile-menu-sheet">
+      <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+        <SheetContent
+          side="bottom"
+          className="mobile-menu-sheet"
+          closeLabel={t('common.close')}
+        >
           <SheetHeader>
-            <SheetTitle>Navegación de LendUp</SheetTitle>
-            <SheetDescription>
-              Accede a todas las operaciones y ajustes de tu cuenta.
-            </SheetDescription>
+            <SheetTitle>{t('nav.menuTitle')}</SheetTitle>
+            <SheetDescription>{t('nav.menuDescription')}</SheetDescription>
           </SheetHeader>
-          <nav aria-label="Navegación móvil secundaria">
-            {visibleNav.slice(2).map(({ to, label, icon: Icon }) => (
-              <NavLink
-                key={to}
-                to={to}
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <Icon />
-                <span>{label}</span>
-              </NavLink>
-            ))}
-            {current.role === 'ADMIN' && (
-              <NavLink
-                to="/admin/incidents"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <ShieldCheck />
-                <span>Administración</span>
-              </NavLink>
-            )}
+          <nav aria-label={t('nav.mobileSecondary')}>
+            {items.map((item) => renderLink(item, () => setMenuOpen(false)))}
           </nav>
+          <div className="mobile-menu-footer">
+            <LanguageSwitcher />
+            {appConfig.demoMode && (
+              <select
+                aria-label={t('demo.viewAs')}
+                value={current.id}
+                onChange={(event) => {
+                  setMenuOpen(false);
+                  changeUser(event.target.value);
+                }}
+              >
+                {demoAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Button type="button" variant="outline" onClick={signOut}>
+              <LogOut aria-hidden="true" />
+              {t('nav.signOut')}
+            </Button>
+          </div>
         </SheetContent>
       </Sheet>
     </div>

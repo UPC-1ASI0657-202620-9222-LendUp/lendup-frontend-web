@@ -6,36 +6,54 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { appConfig } from '@/config/app-config';
 import { createSeed } from '@/mocks/seed';
-import { authService, paymentService } from '@/services/domain-services';
+import { universities } from '@/mocks/catalog';
 import {
-  canManageListing,
   canCancelReservation,
+  canManageListing,
+  canOperate,
   canRequestListing,
-  canAcceptTerms,
-  cancellationRefundAmount,
-  dueAfterExtension,
+  canRetryPayment,
+  cancellationRefund,
+  counterpartOf,
   economicBreakdown,
   extensionCost,
+  guaranteeAfterReturn,
   hasReservationCollision,
   hasUnresolvedIncident,
-  isPeriodAvailable,
+  isInstitutionalEmail,
   isParticipant,
+  isPaymentSettled,
+  isPeriodAvailable,
   mayRateLoan,
+  overlaps,
+  releaseFutureAvailability,
+  remainingGuarantee,
   removeOperationReminders,
   replaceReservedInterval,
-  releaseFutureAvailability,
   shouldMarkOverdue,
-  statusAfterIncidentResolution,
-  statusAfterReceiptConfirmation,
   statusAfterReturnConfirmation,
   updateReturnReminders,
   validPartialCapture,
 } from '@/lib/business-rules';
+import type { MessageKey } from '@/lib/i18n/types';
+import { authProvider, AuthError } from '@/services/adapters/firebase-auth';
+import {
+  guaranteeStatusFromOutcome,
+  paymentStatusFromOutcome,
+} from '@/services/adapters/mercado-pago';
+import {
+  createTermsSnapshot,
+  paymentsService,
+} from '@/services/payments.service';
+import { currentUserOf, termsAcceptedBy } from '@/stores/selectors';
 import type {
+  AppNotification,
   AvailabilitySlot,
   DemoState,
   Evidence,
@@ -43,501 +61,600 @@ import type {
   Incident,
   IncidentDecision,
   Listing,
-  PaymentStatus,
-  Rating,
-  TermsSnapshot,
+  ListingStatus,
+  Loan,
+  NotificationEvent,
+  NotificationParams,
+  PaymentTransaction,
+  ProviderOutcome,
+  Reminder,
+  TimelineEvent,
   User,
-  VerificationStatus,
 } from '@/types/domain';
 
-const STORAGE_KEY = 'lendup-demo-state-v2';
+export interface ActionResult {
+  ok: boolean;
+  message: MessageKey;
+  id?: string;
+}
+
+const success = (message: MessageKey, id?: string): ActionResult => ({
+  ok: true,
+  message,
+  id,
+});
+const failure = (message: MessageKey): ActionResult => ({ ok: false, message });
+
 const uid = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
 
-type NewListing = Omit<Listing, 'id' | 'ownerId' | 'status'>;
-const persistentEvidence = (evidence: Evidence[]) =>
-  evidence.map((item) =>
-    item.url?.startsWith('blob:')
-      ? {
-          ...item,
-          url: item.type === 'PHOTO' ? '/images/camera.png' : undefined,
-        }
-      : item,
-  );
-const persistentListing = <T extends Partial<NewListing>>(listing: T): T => ({
-  ...listing,
-  ...(listing.image?.startsWith('blob:')
-    ? { image: '/images/calculator.webp' }
-    : {}),
-  ...(listing.media
-    ? {
-        media: listing.media.map((item) => ({
-          ...item,
-          url: item.url.startsWith('blob:')
-            ? item.type === 'PHOTO'
-              ? '/images/calculator.webp'
-              : '/images/camera.png'
-            : item.url,
-        })),
-      }
-    : {}),
+const notice = (
+  userId: string,
+  event: NotificationEvent,
+  href: string,
+  params: NotificationParams = {},
+): AppNotification => ({
+  id: uid('notification'),
+  userId,
+  event,
+  params,
+  href,
+  createdAt: now(),
+  read: false,
 });
-type RegisterUser = Pick<
+
+const transaction = (
+  value: Omit<
+    PaymentTransaction,
+    'id' | 'createdAt' | 'updatedAt' | 'currency' | 'providerReference'
+  > & { providerReference?: string },
+): PaymentTransaction => ({
+  ...value,
+  id: uid('tx'),
+  createdAt: now(),
+  updatedAt: now(),
+  currency: 'PEN',
+  providerReference:
+    value.providerReference ??
+    `MP-${value.type}-${Date.now().toString(36).toUpperCase()}`,
+});
+
+const timelineEvent = (
+  event: TimelineEvent['event'],
+  complete = true,
+): TimelineEvent => ({
+  id: uid('timeline'),
+  event,
+  at: complete ? now() : undefined,
+  complete,
+});
+
+const reminder = (value: Omit<Reminder, 'id'>): Reminder => ({
+  id: uid('reminder'),
+  ...value,
+});
+
+export type NewListing = Omit<
+  Listing,
+  'id' | 'ownerId' | 'status' | 'createdAt'
+>;
+export type RegisterUser = Pick<
   User,
   | 'name'
   | 'email'
   | 'phone'
-  | 'university'
+  | 'universityId'
   | 'campus'
   | 'career'
   | 'cycle'
   | 'password'
 >;
+export type ProfileUpdate = Partial<
+  Pick<User, 'avatar' | 'career' | 'cycle' | 'campus' | 'phone'>
+>;
 
 interface DemoActions {
-  switchUser: (id: string) => void;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<ActionResult>;
   logout: () => void;
-  registerUser: (data: RegisterUser) => string;
-  verifyCurrentUser: () => void;
-  setVerificationStatus: (status: VerificationStatus) => void;
-  updateProfile: (
-    data: Partial<
-      Pick<User, 'avatar' | 'career' | 'cycle' | 'campus' | 'phone'>
-    >,
-  ) => void;
-  acceptTerms: () => boolean;
+  switchUser: (id: string) => void;
+  registerUser: (data: RegisterUser) => ActionResult;
+  requestVerification: () => Promise<ActionResult>;
+  completeVerification: (outcome: 'SUCCESS' | 'ERROR') => ActionResult;
+  updateProfile: (data: ProfileUpdate) => ActionResult;
+  acceptTerms: () => ActionResult;
   resetDemo: () => void;
-  toggleListing: (id: string) => boolean;
-  archiveListing: (id: string) => boolean;
-  addListing: (listing: NewListing) => string;
-  updateListing: (id: string, listing: Partial<NewListing>) => boolean;
+  createListing: (listing: NewListing) => ActionResult;
+  updateListing: (id: string, listing: Partial<NewListing>) => ActionResult;
+  setListingStatus: (id: string, status: ListingStatus) => ActionResult;
   saveAvailability: (
     listingId: string,
     slots: AvailabilitySlot[],
-  ) => { ok: boolean; message: string };
+  ) => ActionResult;
   createRequest: (
     listingId: string,
     startAt: string,
     endAt: string,
-  ) => { ok: boolean; id?: string; message?: string };
-  cancelRequest: (id: string) => void;
-  respondRequest: (
+    message?: string,
+  ) => ActionResult;
+  cancelRequest: (id: string) => ActionResult;
+  respondRequest: (id: string, accepted: boolean) => ActionResult;
+  cancelReservation: (id: string, reason: string) => ActionResult;
+  payRental: (
     id: string,
-    accepted: boolean,
-  ) => { ok: boolean; message: string };
-  cancelReservation: (
+    methodId: string,
+    outcome?: ProviderOutcome,
+  ) => Promise<ActionResult>;
+  holdGuarantee: (
     id: string,
-    reason?: string,
-  ) => { ok: boolean; message: string };
-  payReservation: (id: string, method?: string) => void;
-  holdGuarantee: (id: string, method?: string) => void;
-  recordDelivery: (
-    id: string,
-    evidence?: Evidence[],
-  ) => { ok: boolean; message: string };
-  confirmReceipt: (loanId: string) => void;
-  requestExtension: (
-    loanId: string,
-    endAt: string,
-  ) => { ok: boolean; message: string };
-  respondExtension: (loanId: string, accepted: boolean) => void;
+    methodId: string,
+    outcome?: ProviderOutcome,
+  ) => Promise<ActionResult>;
+  recordDelivery: (reservationId: string, evidence: Evidence[]) => ActionResult;
+  confirmReceipt: (loanId: string) => ActionResult;
+  requestExtension: (loanId: string, endAt: string) => ActionResult;
+  respondExtension: (loanId: string, accepted: boolean) => ActionResult;
   payExtension: (
     loanId: string,
-    method: string,
-  ) => { ok: boolean; message: string };
-  proposeReschedule: (
-    loanId: string,
-    endAt: string,
-  ) => { ok: boolean; message: string };
-  respondReschedule: (loanId: string, accepted: boolean) => void;
+    methodId: string,
+    outcome?: ProviderOutcome,
+  ) => Promise<ActionResult>;
+  proposeReschedule: (loanId: string, endAt: string) => ActionResult;
+  respondReschedule: (loanId: string, accepted: boolean) => ActionResult;
   recordReturn: (
     loanId: string,
     early: boolean,
     notes: string,
-    evidence?: Evidence[],
-  ) => void;
-  confirmReturn: (loanId: string) => void;
+    evidence: Evidence[],
+  ) => ActionResult;
+  confirmReturn: (loanId: string) => ActionResult;
   reportIncident: (
     loanId: string,
     type: Incident['type'],
     description: string,
-    evidence?: Evidence[],
-  ) => string | null;
+    evidence: Evidence[],
+  ) => ActionResult;
   submitCounterpartyStatement: (
     incidentId: string,
     statement: string,
-  ) => boolean;
-  startIncidentReview: (incidentId: string) => boolean;
-  addIncidentAdminNote: (incidentId: string, text: string) => boolean;
-  saveAnalysis: (analysis: EvidenceAnalysis) => void;
+  ) => ActionResult;
+  startIncidentReview: (incidentId: string) => ActionResult;
+  addIncidentAdminNote: (incidentId: string, text: string) => ActionResult;
   resolveIncident: (
     id: string,
     decision: IncidentDecision,
     amount: number,
     justification: string,
-  ) => { ok: boolean; message: string };
-  rateLoan: (
-    loanId: string,
-    stars: number,
-    comment: string,
-  ) => { ok: boolean; message: string };
+  ) => ActionResult;
+  saveAnalysis: (analysis: EvidenceAnalysis) => void;
+  rateLoan: (loanId: string, stars: number, comment: string) => ActionResult;
   markNotification: (id?: string) => void;
-  mockRefreshDerivedStatuses: () => void;
 }
 
 interface DemoContextValue extends DemoActions {
   state: DemoState;
   hydrated: boolean;
 }
+
 const DemoContext = createContext<DemoContextValue | null>(null);
 
-const notice = (
-  userId: string,
-  title: string,
-  message: string,
-  href: string,
-  event = 'DOMAIN_EVENT',
-) => ({
-  id: uid('notification'),
-  userId,
-  title,
-  message,
-  createdAt: now(),
-  read: false,
-  href,
-  event,
-});
-const tx = (
-  userId: string,
-  loanId: string | undefined,
-  type: DemoState['transactions'][number]['type'],
-  amount: number,
-  method: string,
-  status: DemoState['transactions'][number]['status'],
-  reservationId?: string,
-  incidentId?: string,
-) => ({
-  id: uid('tx'),
-  userId,
-  loanId,
-  reservationId,
-  incidentId,
-  createdAt: now(),
-  updatedAt: now(),
-  type,
-  amount,
-  currency: 'PEN' as const,
-  method,
-  providerReference: `MOCK-${type}-${Date.now()}`,
-  status,
-});
+function loadStoredState(): DemoState | null {
+  try {
+    const stored = localStorage.getItem(appConfig.storageKeys.state);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as DemoState;
+    return parsed.version === 4 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function refreshDerived(state: DemoState): DemoState {
+  const moment = now();
+  const overdue = state.loans.filter((loan) =>
+    shouldMarkOverdue(loan.status, loan.currentReturnAt, moment),
+  );
+  if (!overdue.length) return state;
+  const ids = new Set(overdue.map((loan) => loan.id));
+  return {
+    ...state,
+    loans: state.loans.map((loan) =>
+      ids.has(loan.id)
+        ? {
+            ...loan,
+            status: 'OVERDUE',
+            timeline: [...loan.timeline, timelineEvent('LOAN_OVERDUE')],
+          }
+        : loan,
+    ),
+    notifications: [
+      ...overdue.flatMap((loan) => {
+        const item = state.listings.find((l) => l.id === loan.listingId)?.title;
+        return [loan.borrowerId, loan.lenderId].map((userId) =>
+          notice(userId, 'LOAN_OVERDUE', `/loans/${loan.id}`, { item }),
+        );
+      }),
+      ...state.notifications,
+    ],
+  };
+}
+
+function settleHold(
+  transactions: PaymentTransaction[],
+  reservationId: string,
+  status: PaymentTransaction['status'],
+) {
+  return transactions.map((item) =>
+    item.type === 'GUARANTEE_HOLD' &&
+    item.reservationId === reservationId &&
+    item.status === 'HELD'
+      ? { ...item, status }
+      : item,
+  );
+}
+
+function persistState(state: DemoState) {
+  try {
+    localStorage.setItem(appConfig.storageKeys.state, JSON.stringify(state));
+  } catch {
+    return;
+  }
+}
 
 export function DemoProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DemoState>(createSeed);
   const [hydrated, setHydrated] = useState(false);
+  const stateRef = useRef(state);
+
+  const commit = useCallback((next: DemoState) => {
+    stateRef.current = next;
+    setState(next);
+    persistState(next);
+  }, []);
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored) as DemoState;
-        if (parsed.version === 3) setState(parsed);
-      }
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
-    }
+    commit(refreshDerived(loadStoredState() ?? stateRef.current));
     setHydrated(true);
-  }, []);
-  useEffect(() => {
-    if (hydrated) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state, hydrated]);
+    const timer = setInterval(() => {
+      const next = refreshDerived(stateRef.current);
+      if (next !== stateRef.current) commit(next);
+    }, 60_000);
+    const syncTabs = (event: StorageEvent) => {
+      if (event.key !== appConfig.storageKeys.state) return;
+      const stored = loadStoredState();
+      if (stored) {
+        stateRef.current = stored;
+        setState(stored);
+      }
+    };
+    window.addEventListener('storage', syncTabs);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('storage', syncTabs);
+    };
+  }, [commit]);
+
+  const read = () => stateRef.current;
+  const me = () => currentUserOf(read());
+  const listingTitle = (s: DemoState, listingId: string) =>
+    s.listings.find((listing) => listing.id === listingId)?.title ?? '';
+  const updateLoan = (
+    s: DemoState,
+    loanId: string,
+    patch: (loan: Loan) => Loan,
+  ) => s.loans.map((loan) => (loan.id === loanId ? patch(loan) : loan));
+
+  const login = useCallback(
+    async (email: string, password: string): Promise<ActionResult> => {
+      try {
+        const session = await authProvider.signIn(
+          email,
+          password,
+          read().users,
+        );
+        commit(
+          refreshDerived({
+            ...read(),
+            currentUserId: session.uid,
+            authenticated: true,
+          }),
+        );
+        return success('results.auth.signedIn');
+      } catch (error) {
+        if (error instanceof AuthError)
+          return failure(`auth.errors.${error.code}` as MessageKey);
+        return failure('auth.errors.INVALID_CREDENTIALS');
+      }
+    },
+    [commit],
+  );
+
+  const logout = useCallback(() => {
+    authProvider.signOut();
+    commit({ ...read(), authenticated: false });
+  }, [commit]);
 
   const switchUser = useCallback(
     (id: string) =>
-      setState((s) => ({
+      commit({ ...read(), currentUserId: id, authenticated: true }),
+    [commit],
+  );
+
+  const registerUser = useCallback(
+    (data: RegisterUser): ActionResult => {
+      const s = read();
+      if (
+        s.users.some(
+          (user) => user.email.toLowerCase() === data.email.toLowerCase(),
+        )
+      )
+        return failure('auth.errors.EMAIL_TAKEN');
+      const university = universities.find(
+        (item) => item.id === data.universityId,
+      );
+      if (!isInstitutionalEmail(data.email, university))
+        return failure('auth.errors.EMAIL_NOT_INSTITUTIONAL');
+      const id = uid('user');
+      const initials = data.name
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((word) => word[0])
+        .join('')
+        .slice(0, 2)
+        .toUpperCase();
+      commit({
         ...s,
         currentUserId: id,
         authenticated: true,
-        termsAccepted: s.termsAcceptances.some((a) => a.userId === id),
-      })),
-    [],
-  );
-  const login = useCallback(
-    async (email: string, password: string) => {
-      const user = await authService.login(state, email, password);
-      setState((s) => ({
-        ...s,
-        currentUserId: user.id,
-        authenticated: true,
-        termsAccepted: s.termsAcceptances.some((a) => a.userId === user.id),
-      }));
+        users: [
+          ...s.users,
+          {
+            ...data,
+            id,
+            firstName: data.name.split(/\s+/)[0],
+            initials,
+            verified: false,
+            verificationStatus: 'PENDING',
+            role: 'STUDENT',
+            accountStatus: 'ACTIVE',
+          },
+        ],
+      });
+      return success('results.auth.registered', id);
     },
-    [state],
+    [commit],
   );
-  const logout = useCallback(
-    () => setState((s) => ({ ...s, authenticated: false })),
-    [],
-  );
-  const registerUser = useCallback((data: RegisterUser) => {
-    const id = uid('user');
-    const initials = data.name
-      .split(' ')
-      .map((word) => word[0])
-      .join('')
-      .slice(0, 2)
-      .toUpperCase();
-    setState((s) => ({
-      ...s,
-      currentUserId: id,
-      authenticated: true,
-      termsAccepted: false,
-      users: [
-        ...s.users,
-        {
-          ...data,
-          id,
-          firstName: data.name.split(' ')[0],
-          initials,
-          rating: 0,
-          ratingCount: 0,
-          completedLoans: 0,
-          verified: false,
-          verificationStatus: 'PENDING',
-          role: 'STUDENT',
-          accountStatus: 'ACTIVE',
-        },
-      ],
-    }));
-    return id;
-  }, []);
-  const verifyCurrentUser = useCallback(
-    () =>
-      setState((s) => ({
-        ...s,
-        users: s.users.map((u) =>
-          u.id === s.currentUserId
-            ? { ...u, verified: true, verificationStatus: 'VERIFIED' }
-            : u,
-        ),
-      })),
-    [],
-  );
-  const setVerificationStatus = useCallback(
-    (status: VerificationStatus) =>
-      setState((s) => ({
+
+  const setVerification = useCallback(
+    (status: User['verificationStatus'], verified?: boolean) => {
+      const s = read();
+      commit({
         ...s,
         users: s.users.map((user) =>
           user.id === s.currentUserId
-            ? { ...user, verificationStatus: status }
+            ? {
+                ...user,
+                verificationStatus: status,
+                verified: verified ?? user.verified,
+              }
             : user,
         ),
-      })),
-    [],
+      });
+    },
+    [commit],
   );
-  const updateProfile = useCallback(
-    (
-      data: Partial<
-        Pick<User, 'avatar' | 'career' | 'cycle' | 'campus' | 'phone'>
-      >,
-    ) =>
-      setState((s) => ({
-        ...s,
-        users: s.users.map((u) =>
-          u.id === s.currentUserId ? { ...u, ...data } : u,
-        ),
-      })),
-    [],
-  );
-  const acceptTerms = useCallback(() => {
-    if (!canAcceptTerms(state.authenticated)) return false;
-    setState((s) => ({
-      ...s,
-      termsAccepted: true,
-      termsAcceptances: [
-        ...s.termsAcceptances.filter((a) => a.userId !== s.currentUserId),
-        { userId: s.currentUserId, version: '1.0', acceptedAt: now() },
-      ],
-    }));
-    return true;
-  }, [state.authenticated]);
-  const resetDemo = useCallback(() => {
-    const fresh = createSeed();
-    setState(fresh);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh));
-  }, []);
 
-  const toggleListing = useCallback(
-    (id: string) => {
+  const requestVerification = useCallback(async (): Promise<ActionResult> => {
+    const user = me();
+    if (!user || user.verified)
+      return failure('results.verification.notAllowed');
+    setVerification('SENDING');
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    setVerification('SENT');
+    return success('results.verification.sent');
+  }, [setVerification]);
+
+  const completeVerification = useCallback(
+    (outcome: 'SUCCESS' | 'ERROR'): ActionResult => {
+      const user = me();
+      if (!user) return failure('results.verification.notAllowed');
+      const university = universities.find(
+        (item) => item.id === user.universityId,
+      );
       if (
-        !canManageListing(
-          state.listings.find((item) => item.id === id),
-          state.currentUserId,
-        )
-      )
-        return false;
-      setState((s) => ({
-        ...s,
-        listings: s.listings.map((l) =>
-          l.id === id
-            ? { ...l, status: l.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE' }
-            : l,
-        ),
-      }));
-      return true;
+        outcome === 'ERROR' ||
+        !isInstitutionalEmail(user.email, university)
+      ) {
+        setVerification('ERROR', false);
+        return failure('results.verification.failed');
+      }
+      setVerification('VERIFIED', true);
+      return success('results.verification.verified');
     },
-    [state],
+    [setVerification],
   );
-  const archiveListing = useCallback(
-    (id: string) => {
-      if (
-        !canManageListing(
-          state.listings.find((item) => item.id === id),
-          state.currentUserId,
-        )
-      )
-        return false;
-      setState((s) => ({
+
+  const updateProfile = useCallback(
+    (data: ProfileUpdate): ActionResult => {
+      const s = read();
+      commit({
         ...s,
-        listings: s.listings.map((l) =>
-          l.id === id ? { ...l, status: 'ARCHIVED' } : l,
+        users: s.users.map((user) =>
+          user.id === s.currentUserId ? { ...user, ...data } : user,
         ),
-      }));
-      return true;
+      });
+      return success('results.profile.saved');
     },
-    [state],
+    [commit],
   );
-  const addListing = useCallback((listing: NewListing) => {
-    const id = uid('listing');
-    const persistedListing = persistentListing(listing);
-    setState((s) => ({
+
+  const acceptTerms = useCallback((): ActionResult => {
+    const s = read();
+    if (!s.authenticated) return failure('results.terms.loginRequired');
+    commit({
       ...s,
-      listings: [
+      termsAcceptances: [
+        ...s.termsAcceptances.filter((item) => item.userId !== s.currentUserId),
         {
-          ...persistedListing,
-          id,
-          ownerId: s.currentUserId,
-          status: 'ACTIVE',
+          userId: s.currentUserId,
+          version: appConfig.termsVersion,
+          acceptedAt: now(),
         },
-        ...s.listings,
       ],
-    }));
-    return id;
-  }, []);
+    });
+    return success('results.terms.accepted');
+  }, [commit]);
+
+  const resetDemo = useCallback(() => {
+    const fresh = {
+      ...refreshDerived(createSeed()),
+      authenticated: true,
+      currentUserId: read().currentUserId,
+    };
+    commit(fresh);
+  }, [commit]);
+
+  const operationGate = (s: DemoState): ActionResult | null => {
+    const user = currentUserOf(s);
+    if (!user?.verified) return failure('results.gate.verificationRequired');
+    if (!termsAcceptedBy(s, user.id))
+      return failure('results.gate.termsRequired');
+    if (!canOperate(user, true)) return failure('results.gate.forbidden');
+    return null;
+  };
+
+  const createListing = useCallback(
+    (listing: NewListing): ActionResult => {
+      const s = read();
+      const blocked = operationGate(s);
+      if (blocked) return blocked;
+      if (listing.dailyRate <= 0) return failure('results.listing.invalidRate');
+      const id = uid('listing');
+      commit({
+        ...s,
+        listings: [
+          {
+            ...listing,
+            id,
+            ownerId: s.currentUserId,
+            status: 'ACTIVE',
+            createdAt: now(),
+          },
+          ...s.listings,
+        ],
+      });
+      return success('results.listing.published', id);
+    },
+    [commit],
+  );
+
   const updateListing = useCallback(
-    (id: string, listing: Partial<NewListing>) => {
-      if (
-        !canManageListing(
-          state.listings.find((item) => item.id === id),
-          state.currentUserId,
-        )
-      )
-        return false;
-      const persistedListing = persistentListing(listing);
-      setState((s) => ({
+    (id: string, patch: Partial<NewListing>): ActionResult => {
+      const s = read();
+      const listing = s.listings.find((item) => item.id === id);
+      if (!canManageListing(listing, s.currentUserId))
+        return failure('results.gate.forbidden');
+      if (patch.dailyRate !== undefined && patch.dailyRate <= 0)
+        return failure('results.listing.invalidRate');
+      commit({
         ...s,
         listings: s.listings.map((item) =>
-          item.id === id ? { ...item, ...persistedListing } : item,
+          item.id === id ? { ...item, ...patch } : item,
         ),
-      }));
-      return true;
+      });
+      return success('results.listing.updated', id);
     },
-    [state],
+    [commit],
   );
+
+  const setListingStatus = useCallback(
+    (id: string, status: ListingStatus): ActionResult => {
+      const s = read();
+      const listing = s.listings.find((item) => item.id === id);
+      if (!listing || !canManageListing(listing, s.currentUserId))
+        return failure('results.gate.forbidden');
+      if (listing.status === 'ARCHIVED')
+        return failure('results.listing.archivedLocked');
+      commit({
+        ...s,
+        listings: s.listings.map((item) =>
+          item.id === id ? { ...item, status } : item,
+        ),
+      });
+      const messages: Record<ListingStatus, MessageKey> = {
+        ACTIVE: 'results.listing.reactivated',
+        PAUSED: 'results.listing.paused',
+        ARCHIVED: 'results.listing.archived',
+      };
+      return success(messages[status]);
+    },
+    [commit],
+  );
+
   const saveAvailability = useCallback(
-    (listingId: string, slots: AvailabilitySlot[]) => {
-      const listing = state.listings.find((item) => item.id === listingId);
-      if (!canManageListing(listing, state.currentUserId))
-        return {
-          ok: false,
-          message: 'No tienes permiso para editar esta disponibilidad.',
-        };
-      const reserved = listing!.availabilitySlots.filter(
+    (listingId: string, slots: AvailabilitySlot[]): ActionResult => {
+      const s = read();
+      const listing = s.listings.find((item) => item.id === listingId);
+      if (!listing || !canManageListing(listing, s.currentUserId))
+        return failure('results.gate.forbidden');
+      const available = slots.filter((slot) => slot.status === 'AVAILABLE');
+      if (
+        available.some((slot) => new Date(slot.endAt) <= new Date(slot.startAt))
+      )
+        return failure('results.availability.invalidRange');
+      const reserved = listing.availabilitySlots.filter(
         (slot) => slot.status === 'RESERVED',
       );
       if (
-        slots.some((slot) =>
-          reserved.some((block) =>
-            hasReservationCollision([block], slot.startAt, slot.endAt),
-          ),
+        available.some((slot) =>
+          hasReservationCollision(reserved, slot.startAt, slot.endAt),
         )
       )
-        return {
-          ok: false,
-          message:
-            'Un intervalo disponible no puede superponerse con una reserva.',
-        };
-      setState((s) => ({
-        ...s,
-        listings: s.listings.map((listing) =>
-          listing.id === listingId
-            ? {
-                ...listing,
-                availabilitySlots: [
-                  ...listing.availabilitySlots.filter(
-                    (slot) => slot.status === 'RESERVED',
-                  ),
-                  ...slots.filter((slot) => slot.status === 'AVAILABLE'),
-                ],
-              }
-            : listing,
+        return failure('results.availability.overlapsReservation');
+      const overlapping = available.some((slot, index) =>
+        available.some(
+          (other, otherIndex) =>
+            otherIndex !== index &&
+            overlaps(slot.startAt, slot.endAt, other.startAt, other.endAt),
         ),
-      }));
-      return { ok: true, message: 'Disponibilidad guardada.' };
+      );
+      if (overlapping) return failure('results.availability.overlapsItself');
+      commit({
+        ...s,
+        listings: s.listings.map((item) =>
+          item.id === listingId
+            ? { ...item, availabilitySlots: [...reserved, ...available] }
+            : item,
+        ),
+      });
+      return success('results.availability.saved');
     },
-    [state],
+    [commit],
   );
 
   const createRequest = useCallback(
-    (listingId: string, startAt: string, endAt: string) => {
-      const listing = state.listings.find((item) => item.id === listingId);
+    (
+      listingId: string,
+      startAt: string,
+      endAt: string,
+      message?: string,
+    ): ActionResult => {
+      const s = read();
+      const listing = s.listings.find((item) => item.id === listingId);
       if (!listing || listing.status !== 'ACTIVE')
-        return { ok: false, message: 'La publicación no está disponible.' };
-      if (!canRequestListing(listing, state.currentUserId))
-        return { ok: false, message: 'No puedes solicitar tu propio objeto.' };
-      if (!state.termsAccepted)
-        return {
-          ok: false,
-          message: 'Debes aceptar los términos antes de solicitar.',
-        };
+        return failure('results.request.listingUnavailable');
+      if (!canRequestListing(listing, s.currentUserId))
+        return failure('results.request.ownListing');
+      const blocked = operationGate(s);
+      if (blocked) return blocked;
       if (new Date(endAt) <= new Date(startAt))
-        return {
-          ok: false,
-          message: 'La fecha final debe ser posterior a la inicial.',
-        };
+        return failure('results.request.invalidRange');
       if (new Date(startAt) <= new Date())
-        return {
-          ok: false,
-          message: 'El periodo solicitado debe comenzar en el futuro.',
-        };
+        return failure('results.request.pastStart');
       if (!isPeriodAvailable(listing.availabilitySlots, startAt, endAt))
-        return {
-          ok: false,
-          message: 'El periodo seleccionado no está disponible.',
-        };
+        return failure('results.request.periodUnavailable');
       const id = uid('request');
-      const snap: TermsSnapshot = {
-        dailyRate: listing.dailyRate,
-        guaranteeAmount: listing.guaranteeAmount,
-        startAt,
-        endAt,
-        originalEndAt: endAt,
-        providerFee: paymentService.getEconomicQuoteSync({
-          dailyRate: listing.dailyRate,
-          guaranteeAmount: listing.guaranteeAmount,
-          startAt,
-          endAt,
-        }).serviceFee,
-        cancellationPolicy: {
-          borrowerRefundRate: 1,
-          lenderRefundRate: 1,
-          description: listing.terms.cancellation,
-        },
-        exchangePlace: listing.exchangePlace,
-        ...listing.terms,
-      };
-      setState((s) => ({
+      commit({
         ...s,
         requests: [
           {
@@ -547,193 +664,204 @@ export function DemoProvider({ children }: { children: ReactNode }) {
             lenderId: listing.ownerId,
             startAt,
             endAt,
-            createdAt: now(),
+            message: message?.trim() || undefined,
             status: 'PENDING',
-            snapshot: snap,
+            createdAt: now(),
+            snapshot: createTermsSnapshot(listing, startAt, endAt),
           },
           ...s.requests,
         ],
         notifications: [
-          notice(
-            listing.ownerId,
-            'Nueva solicitud',
-            `Recibiste una solicitud por ${listing.title}.`,
-            '/requests',
-            'REQUEST_CREATED',
-          ),
+          notice(listing.ownerId, 'REQUEST_CREATED', '/requests', {
+            item: listing.title,
+          }),
           ...s.notifications,
         ],
-      }));
-      return { ok: true, id };
+      });
+      return success('results.request.created', id);
     },
-    [state],
+    [commit],
   );
+
   const cancelRequest = useCallback(
-    (id: string) =>
-      setState((s) => {
-        const request = s.requests.find((r) => r.id === id);
-        if (
-          !request ||
-          request.status !== 'PENDING' ||
-          request.borrowerId !== s.currentUserId
-        )
-          return s;
-        return {
-          ...s,
-          requests: s.requests.map((r) =>
-            r.id === id ? { ...r, status: 'CANCELLED' } : r,
-          ),
-          notifications: [
-            notice(
-              request.lenderId,
-              'Solicitud cancelada',
-              'El prestatario canceló la solicitud pendiente.',
-              '/requests',
-              'REQUEST_CANCELLED',
-            ),
-            ...s.notifications,
-          ],
-        };
-      }),
-    [],
-  );
-  const respondRequest = useCallback(
-    (id: string, accepted: boolean) => {
-      const request = state.requests.find((item) => item.id === id);
+    (id: string): ActionResult => {
+      const s = read();
+      const request = s.requests.find((item) => item.id === id);
       if (
         !request ||
         request.status !== 'PENDING' ||
-        request.lenderId !== state.currentUserId
+        request.borrowerId !== s.currentUserId
       )
-        return { ok: false, message: 'No puedes responder esta solicitud.' };
-      const listing = state.listings.find(
-        (item) => item.id === request.listingId,
-      );
+        return failure('results.gate.forbidden');
+      commit({
+        ...s,
+        requests: s.requests.map((item) =>
+          item.id === id
+            ? { ...item, status: 'CANCELLED', respondedAt: now() }
+            : item,
+        ),
+        notifications: [
+          notice(request.lenderId, 'REQUEST_CANCELLED', '/requests', {
+            item: listingTitle(s, request.listingId),
+          }),
+          ...s.notifications,
+        ],
+      });
+      return success('results.request.cancelled');
+    },
+    [commit],
+  );
+
+  const respondRequest = useCallback(
+    (id: string, accepted: boolean): ActionResult => {
+      const s = read();
+      const request = s.requests.find((item) => item.id === id);
       if (
-        accepted &&
-        (!listing ||
-          !isPeriodAvailable(
-            listing.availabilitySlots,
-            request.startAt,
-            request.endAt,
-          ))
+        !request ||
+        request.status !== 'PENDING' ||
+        request.lenderId !== s.currentUserId
       )
-        return { ok: false, message: 'El periodo ya no está disponible.' };
-      setState((s) => {
-        const request = s.requests.find((r) => r.id === id);
-        if (
-          !request ||
-          request.status !== 'PENDING' ||
-          request.lenderId !== s.currentUserId
-        )
-          return s;
-        const status = accepted ? 'ACCEPTED' : 'REJECTED';
-        if (!accepted)
-          return {
-            ...s,
-            requests: s.requests.map((r) =>
-              r.id === id ? { ...r, status } : r,
-            ),
-            notifications: [
-              notice(
-                request.borrowerId,
-                'Solicitud rechazada',
-                'El prestamista no pudo aceptar las fechas solicitadas.',
-                '/requests',
-                'REQUEST_REJECTED',
-              ),
-              ...s.notifications,
-            ],
-          };
-        const reservationId = uid('reservation');
-        return {
+        return failure('results.gate.forbidden');
+      const listing = s.listings.find((item) => item.id === request.listingId);
+      const item = listing?.title ?? '';
+      if (!accepted) {
+        commit({
           ...s,
-          requests: s.requests.map((r) => (r.id === id ? { ...r, status } : r)),
-          reservations: [
-            {
-              id: reservationId,
-              requestId: id,
-              listingId: request.listingId,
-              borrowerId: request.borrowerId,
-              lenderId: request.lenderId,
-              status: 'CONFIRMED',
-              paymentStatus: 'PENDING',
-              guaranteeStatus:
-                request.snapshot.guaranteeAmount > 0
-                  ? 'PENDING'
-                  : 'NOT_REQUIRED',
-              deliveryRecorded: false,
-              snapshot: { ...request.snapshot },
-            },
-            ...s.reservations,
-          ],
-          listings: s.listings.map((l) =>
-            l.id === request.listingId
-              ? {
-                  ...l,
-                  availabilitySlots: [
-                    ...l.availabilitySlots,
-                    {
-                      id: uid('slot'),
-                      startAt: request.startAt,
-                      endAt: request.endAt,
-                      status: 'RESERVED',
-                      reservationId,
-                    },
-                  ],
-                }
-              : l,
+          requests: s.requests.map((r) =>
+            r.id === id ? { ...r, status: 'REJECTED', respondedAt: now() } : r,
           ),
           notifications: [
-            notice(
-              request.borrowerId,
-              'Solicitud aceptada',
-              'Tu reserva fue confirmada. Ya puedes completar el pago.',
-              `/reservations/${reservationId}`,
-              'REQUEST_ACCEPTED',
-            ),
-            notice(
-              request.borrowerId,
-              'Reserva confirmada',
-              'Las condiciones y el periodo quedaron reservados.',
-              `/reservations/${reservationId}`,
-              'RESERVATION_CONFIRMED',
-            ),
+            notice(request.borrowerId, 'REQUEST_REJECTED', '/requests', {
+              item,
+            }),
             ...s.notifications,
           ],
-        };
+        });
+        return success('results.request.rejected');
+      }
+      if (!listing) return failure('results.request.listingUnavailable');
+      if (accepted && !termsAcceptedBy(s, s.currentUserId))
+        return failure('results.gate.termsRequired');
+      if (
+        !isPeriodAvailable(
+          listing.availabilitySlots,
+          request.startAt,
+          request.endAt,
+        )
+      )
+        return failure('results.request.periodTaken');
+      const reservationId = uid('reservation');
+      const snapshot = { ...request.snapshot };
+      commit({
+        ...s,
+        requests: s.requests.map((r) =>
+          r.id === id ? { ...r, status: 'ACCEPTED', respondedAt: now() } : r,
+        ),
+        reservations: [
+          {
+            id: reservationId,
+            requestId: id,
+            listingId: request.listingId,
+            borrowerId: request.borrowerId,
+            lenderId: request.lenderId,
+            status: 'CONFIRMED',
+            paymentStatus: 'PENDING',
+            guaranteeStatus:
+              snapshot.guaranteeAmount > 0 ? 'PENDING' : 'NOT_REQUIRED',
+            deliveryRecorded: false,
+            createdAt: now(),
+            snapshot,
+          },
+          ...s.reservations,
+        ],
+        listings: s.listings.map((l) =>
+          l.id === request.listingId
+            ? {
+                ...l,
+                availabilitySlots: replaceReservedInterval(
+                  l.availabilitySlots,
+                  reservationId,
+                  request.startAt,
+                  request.endAt,
+                ),
+              }
+            : l,
+        ),
+        reminders: [
+          reminder({
+            userId: request.borrowerId,
+            operationId: reservationId,
+            listingId: request.listingId,
+            kind: 'PAYMENT_DUE',
+            dueAt: request.startAt,
+            href: `/reservations/${reservationId}`,
+          }),
+          reminder({
+            userId: request.lenderId,
+            operationId: reservationId,
+            listingId: request.listingId,
+            kind: 'DELIVERY',
+            dueAt: request.startAt,
+            href: `/reservations/${reservationId}`,
+          }),
+          ...s.reminders,
+        ],
+        notifications: [
+          notice(
+            request.borrowerId,
+            'REQUEST_ACCEPTED',
+            `/reservations/${reservationId}`,
+            { item },
+          ),
+          ...s.notifications,
+        ],
       });
-      return {
-        ok: true,
-        message: accepted ? 'Solicitud aceptada.' : 'Solicitud rechazada.',
-      };
+      return success('results.request.accepted', reservationId);
     },
-    [state],
+    [commit],
   );
 
   const cancelReservation = useCallback(
-    (id: string, reason = 'Cancelación solicitada por el usuario') => {
-      const reservation = state.reservations.find((r) => r.id === id);
-      const relatedLoan = state.loans.find((l) => l.reservationId === id);
-      if (
-        !reservation ||
-        !isParticipant(reservation, state.currentUserId) ||
-        !canCancelReservation(reservation, relatedLoan)
-      )
-        return {
-          ok: false,
-          message:
-            'El préstamo ya está activo y no puede cancelarse después de confirmar la recepción.',
-        };
-      const refundAmount = cancellationRefundAmount(
-        reservation.snapshot,
-        state.currentUserId === reservation.lenderId ? 'LENDER' : 'BORROWER',
-      );
-      const counterpart =
-        state.currentUserId === reservation.borrowerId
-          ? reservation.lenderId
-          : reservation.borrowerId;
-      setState((s) => ({
+    (id: string, reason: string): ActionResult => {
+      const s = read();
+      const reservation = s.reservations.find((item) => item.id === id);
+      if (!reservation || !isParticipant(reservation, s.currentUserId))
+        return failure('results.gate.forbidden');
+      if (!canCancelReservation(reservation))
+        return failure('results.reservation.cancelNotAllowed');
+      if (!reason.trim()) return failure('results.reservation.reasonRequired');
+      const actor =
+        s.currentUserId === reservation.lenderId ? 'LENDER' : 'BORROWER';
+      const refund = cancellationRefund(reservation, actor);
+      const counterpart = counterpartOf(reservation, s.currentUserId);
+      const item = listingTitle(s, reservation.listingId);
+      const refunds: PaymentTransaction[] = [
+        ...(refund.rentalRefund > 0
+          ? [
+              transaction({
+                userId: reservation.borrowerId,
+                reservationId: id,
+                type: 'REFUND',
+                amount: refund.rentalRefund,
+                method: reservation.paymentMethod ?? '',
+                status: 'REFUNDED',
+              }),
+            ]
+          : []),
+        ...(refund.guaranteeRelease > 0
+          ? [
+              transaction({
+                userId: reservation.borrowerId,
+                reservationId: id,
+                type: 'GUARANTEE_RELEASE',
+                amount: refund.guaranteeRelease,
+                method: reservation.guaranteePaymentMethod ?? '',
+                status: 'RELEASED',
+              }),
+            ]
+          : []),
+      ];
+      commit({
         ...s,
         reservations: s.reservations.map((r) =>
           r.id === id
@@ -741,12 +869,20 @@ export function DemoProvider({ children }: { children: ReactNode }) {
                 ...r,
                 status: 'CANCELLED',
                 paymentStatus:
-                  r.paymentStatus === 'PENDING' ? 'PENDING' : 'REFUNDED',
-                guaranteeStatus: ['HELD', 'PENDING'].includes(r.guaranteeStatus)
-                  ? 'REFUNDED'
-                  : r.guaranteeStatus,
+                  refund.rentalRefund > 0
+                    ? 'REFUNDED'
+                    : r.paymentStatus === 'PENDING_RELEASE'
+                      ? 'REFUNDED'
+                      : 'CANCELLED',
+                guaranteeStatus:
+                  refund.guaranteeRelease > 0
+                    ? 'RELEASED'
+                    : r.guaranteeStatus === 'NOT_REQUIRED'
+                      ? 'NOT_REQUIRED'
+                      : 'CANCELLED',
                 cancelledAt: now(),
-                cancellationReason: reason,
+                cancelledBy: s.currentUserId,
+                cancellationReason: reason.trim(),
               }
             : r,
         ),
@@ -760,779 +896,688 @@ export function DemoProvider({ children }: { children: ReactNode }) {
               }
             : l,
         ),
+        transactions: refund.guaranteeRelease
+          ? settleHold([...refunds, ...s.transactions], id, 'RELEASED')
+          : [...refunds, ...s.transactions],
+        reminders: removeOperationReminders(s.reminders, id),
+        notifications: [
+          notice(counterpart, 'RESERVATION_CANCELLED', `/reservations/${id}`, {
+            item,
+            reason: reason.trim(),
+          }),
+          ...s.notifications,
+        ],
+      });
+      return success('results.reservation.cancelled');
+    },
+    [commit],
+  );
+
+  const payRental = useCallback(
+    async (
+      id: string,
+      methodId: string,
+      outcome?: ProviderOutcome,
+    ): Promise<ActionResult> => {
+      const initial = read().reservations.find((item) => item.id === id);
+      if (
+        !initial ||
+        initial.borrowerId !== read().currentUserId ||
+        initial.status !== 'CONFIRMED'
+      )
+        return failure('results.gate.forbidden');
+      if (!canRetryPayment(initial.paymentStatus))
+        return failure('results.payment.alreadyPaid');
+      if (
+        initial.snapshot.guaranteeAmount > 0 &&
+        initial.guaranteeStatus !== 'HELD'
+      )
+        return failure('results.payment.guaranteeFirst');
+      const charge = await paymentsService.charge('RENTAL', outcome);
+      const s = read();
+      const reservation = s.reservations.find((item) => item.id === id);
+      if (!reservation || !canRetryPayment(reservation.paymentStatus))
+        return failure('results.payment.alreadyPaid');
+      const status = paymentStatusFromOutcome(charge.outcome);
+      const amount = economicBreakdown(reservation.snapshot).rentalCharge;
+      const approved = status === 'PENDING_RELEASE';
+      const item = listingTitle(s, reservation.listingId);
+      commit({
+        ...s,
+        reservations: s.reservations.map((r) =>
+          r.id === id
+            ? { ...r, paymentStatus: status, paymentMethod: methodId }
+            : r,
+        ),
         transactions: [
-          ...(reservation.paymentStatus !== 'PENDING'
-            ? [
-                tx(
-                  reservation.borrowerId,
-                  relatedLoan?.id,
-                  'REFUND',
-                  refundAmount,
-                  reservation.paymentMethod ?? 'Yape',
-                  'REFUNDED',
-                  id,
-                ),
-              ]
-            : []),
-          ...(reservation.guaranteeStatus === 'HELD'
-            ? [
-                tx(
-                  reservation.borrowerId,
-                  relatedLoan?.id,
-                  'GUARANTEE_RELEASE',
-                  reservation.snapshot.guaranteeAmount,
-                  reservation.guaranteePaymentMethod ?? 'Yape',
-                  'REFUNDED',
-                  id,
-                ),
-              ]
-            : []),
+          transaction({
+            userId: reservation.borrowerId,
+            reservationId: id,
+            type: 'RENTAL_PAYMENT',
+            amount,
+            method: methodId,
+            status,
+            providerReference: charge.reference,
+          }),
           ...s.transactions,
         ],
         notifications: [
-          notice(
-            counterpart,
-            'Reserva cancelada',
-            `La reserva fue cancelada. Motivo: ${reason}`,
-            `/reservations/${id}`,
-            'RESERVATION_CANCELLED',
-          ),
+          approved
+            ? notice(
+                reservation.lenderId,
+                'PAYMENT_CONFIRMED',
+                `/reservations/${id}`,
+                { item },
+              )
+            : notice(
+                reservation.borrowerId,
+                'PAYMENT_FAILED',
+                `/reservations/${id}/checkout`,
+                { item },
+              ),
           ...s.notifications,
         ],
-        reminders: removeOperationReminders(
-          removeOperationReminders(s.reminders, id),
-          relatedLoan?.id ?? '',
-        ),
-      }));
-      return {
-        ok: true,
-        message:
-          'La reserva fue cancelada; el periodo y los importes aplicables fueron liberados.',
-      };
+        reminders:
+          approved &&
+          isPaymentSettled({ ...reservation, paymentStatus: status })
+            ? s.reminders.filter(
+                (r) => !(r.operationId === id && r.kind === 'PAYMENT_DUE'),
+              )
+            : s.reminders,
+      });
+      return approved
+        ? success('results.payment.approved')
+        : failure(`results.payment.${charge.outcome}` as MessageKey);
     },
-    [state],
+    [commit],
   );
 
-  const payReservation = useCallback(
-    (id: string, method = 'Yape') =>
-      setState((s) => {
-        const reservation = s.reservations.find((r) => r.id === id);
-        if (
-          !reservation ||
-          reservation.borrowerId !== s.currentUserId ||
-          reservation.paymentStatus !== 'PENDING'
-        )
-          return s;
-        const amount =
-          economicBreakdown(reservation.snapshot).fee +
-          economicBreakdown(reservation.snapshot).serviceFee;
-        return {
-          ...s,
-          reservations: s.reservations.map((r) =>
-            r.id === id
-              ? {
-                  ...r,
-                  paymentStatus: 'PENDING_RELEASE',
-                  paymentMethod: method,
-                }
-              : r,
-          ),
-          transactions: [
-            tx(
-              reservation.borrowerId,
-              undefined,
-              'RENTAL_PAYMENT',
-              amount,
-              method,
-              'PENDING_RELEASE',
-              id,
-            ),
-            ...s.transactions,
-          ],
-          notifications: [
-            notice(
-              reservation.lenderId,
-              'Pago confirmado',
-              'La tarifa fue confirmada y está pendiente de liberación.',
-              `/reservations/${id}`,
-              'PAYMENT_CONFIRMED',
-            ),
-            ...s.notifications,
-          ],
-        };
-      }),
-    [],
-  );
   const holdGuarantee = useCallback(
-    (id: string, method = 'Yape') =>
-      setState((s) => {
-        const reservation = s.reservations.find((r) => r.id === id);
-        if (
-          !reservation ||
-          reservation.borrowerId !== s.currentUserId ||
-          reservation.guaranteeStatus === 'NOT_REQUIRED' ||
-          reservation.paymentStatus !== 'PENDING_RELEASE'
-        )
-          return s;
-        return {
-          ...s,
-          reservations: s.reservations.map((r) =>
-            r.id === id
-              ? {
-                  ...r,
-                  guaranteeStatus: 'HELD',
-                  guaranteePaymentMethod: method,
-                }
-              : r,
-          ),
-          transactions: [
-            tx(
-              reservation.borrowerId,
-              undefined,
-              'GUARANTEE_HOLD',
-              reservation.snapshot.guaranteeAmount,
-              method,
-              'HELD',
-              id,
-            ),
-            ...s.transactions,
-          ],
-          notifications: [
-            notice(
-              reservation.lenderId,
-              'Garantía retenida',
-              'La garantía quedó constituida para esta reserva.',
-              `/reservations/${id}`,
-              'GUARANTEE_HELD',
-            ),
-            ...s.notifications,
-          ],
-        };
-      }),
-    [],
+    async (
+      id: string,
+      methodId: string,
+      outcome?: ProviderOutcome,
+    ): Promise<ActionResult> => {
+      const initial = read().reservations.find((item) => item.id === id);
+      if (
+        !initial ||
+        initial.borrowerId !== read().currentUserId ||
+        initial.status !== 'CONFIRMED'
+      )
+        return failure('results.gate.forbidden');
+      if (!['PENDING', 'FAILED', 'CANCELLED'].includes(initial.guaranteeStatus))
+        return failure('results.payment.guaranteeAlreadyHeld');
+      const charge = await paymentsService.charge('GUARANTEE', outcome);
+      const s = read();
+      const reservation = s.reservations.find((item) => item.id === id);
+      if (!reservation) return failure('results.gate.forbidden');
+      const status = guaranteeStatusFromOutcome(charge.outcome);
+      const approved = status === 'HELD';
+      const item = listingTitle(s, reservation.listingId);
+      commit({
+        ...s,
+        reservations: s.reservations.map((r) =>
+          r.id === id
+            ? {
+                ...r,
+                guaranteeStatus: status,
+                guaranteePaymentMethod: methodId,
+              }
+            : r,
+        ),
+        transactions: [
+          transaction({
+            userId: reservation.borrowerId,
+            reservationId: id,
+            type: 'GUARANTEE_HOLD',
+            amount: reservation.snapshot.guaranteeAmount,
+            method: methodId,
+            status,
+            providerReference: charge.reference,
+          }),
+          ...s.transactions,
+        ],
+        notifications: [
+          approved
+            ? notice(
+                reservation.lenderId,
+                'GUARANTEE_HELD',
+                `/reservations/${id}`,
+                { item },
+              )
+            : notice(
+                reservation.borrowerId,
+                'GUARANTEE_FAILED',
+                `/reservations/${id}/checkout`,
+                { item },
+              ),
+          ...s.notifications,
+        ],
+        reminders:
+          approved &&
+          isPaymentSettled({ ...reservation, guaranteeStatus: status })
+            ? s.reminders.filter(
+                (r) => !(r.operationId === id && r.kind === 'PAYMENT_DUE'),
+              )
+            : s.reminders,
+      });
+      return approved
+        ? success('results.payment.guaranteeHeld')
+        : failure(`results.payment.${charge.outcome}` as MessageKey);
+    },
+    [commit],
   );
 
   const recordDelivery = useCallback(
-    (id: string, evidence: Evidence[] = []) => {
-      const savedEvidence = persistentEvidence(evidence);
-      const reservation = state.reservations.find((r) => r.id === id);
-      if (!reservation) return { ok: false, message: 'Reserva no encontrada.' };
-      if (reservation.lenderId !== state.currentUserId)
-        return {
-          ok: false,
-          message: 'Solo el prestamista puede registrar la entrega.',
-        };
+    (reservationId: string, evidence: Evidence[]): ActionResult => {
+      const s = read();
+      const reservation = s.reservations.find(
+        (item) => item.id === reservationId,
+      );
+      if (!reservation || reservation.lenderId !== s.currentUserId)
+        return failure('results.gate.forbidden');
       if (reservation.status !== 'CONFIRMED' || reservation.deliveryRecorded)
-        return {
-          ok: false,
-          message: 'La reserva no admite un nuevo registro de entrega.',
-        };
-      if (!savedEvidence.some((item) => item.phase === 'INITIAL'))
-        return {
-          ok: false,
-          message: 'Registra al menos una evidencia inicial.',
-        };
+        return failure('results.delivery.notAllowed');
       if (reservation.paymentStatus !== 'PENDING_RELEASE')
-        return { ok: false, message: 'El pago debe estar confirmado.' };
-      if (
-        reservation.snapshot.guaranteeAmount > 0 &&
-        reservation.guaranteeStatus !== 'HELD'
-      )
-        return { ok: false, message: 'La garantía debe estar retenida.' };
-      const existing = state.loans.find((l) => l.reservationId === id);
-      const loanId = existing?.id ?? uid('loan');
-      setState((s) => ({
+        return failure('results.delivery.paymentRequired');
+      if (!isPaymentSettled(reservation))
+        return failure('results.delivery.guaranteeRequired');
+      const loanId = uid('loan');
+      const deliveredAt = now();
+      const item = listingTitle(s, reservation.listingId);
+      const loan: Loan = {
+        id: loanId,
+        reservationId,
+        listingId: reservation.listingId,
+        borrowerId: reservation.borrowerId,
+        lenderId: reservation.lenderId,
+        status: 'PENDING_RECEIPT',
+        paymentStatus: reservation.paymentStatus,
+        guaranteeStatus: reservation.guaranteeStatus,
+        snapshot: { ...reservation.snapshot },
+        deliveredAt,
+        currentReturnAt: reservation.snapshot.endAt,
+        originalReturnAt: reservation.snapshot.originalEndAt,
+        extensions: [],
+        reschedules: [],
+        evidence: evidence.map((entry) => ({ ...entry, phase: 'INITIAL' })),
+        timeline: [
+          timelineEvent('DELIVERY_RECORDED'),
+          timelineEvent('RECEIPT_PENDING', false),
+        ],
+        ratedBy: [],
+      };
+      commit({
         ...s,
         reservations: s.reservations.map((r) =>
-          r.id === id ? { ...r, deliveryRecorded: true } : r,
+          r.id === reservationId
+            ? { ...r, deliveryRecorded: true, deliveredAt }
+            : r,
         ),
-        loans: existing
-          ? s.loans.map((l) =>
-              l.id === loanId
-                ? {
-                    ...l,
-                    status: 'PENDING_RECEIPT',
-                    evidence: [...l.evidence, ...savedEvidence],
-                  }
-                : l,
-            )
-          : [
-              {
-                id: loanId,
-                reservationId: id,
-                listingId: reservation.listingId,
-                borrowerId: reservation.borrowerId,
-                lenderId: reservation.lenderId,
-                status: 'PENDING_RECEIPT',
-                paymentStatus: reservation.paymentStatus,
-                guaranteeStatus: reservation.guaranteeStatus,
-                snapshot: { ...reservation.snapshot },
-                currentReturnAt: reservation.snapshot.endAt,
-                originalReturnAt: reservation.snapshot.originalEndAt,
-                extensions: [],
-                reschedules: [],
-                evidence: savedEvidence,
-                timeline: [
-                  {
-                    id: uid('timeline'),
-                    label: 'Entrega registrada',
-                    date: 'Ahora',
-                    complete: true,
-                  },
-                  {
-                    id: uid('timeline'),
-                    label: 'Confirmación de recepción',
-                    date: 'Pendiente',
-                    complete: false,
-                  },
-                ],
-                ratedBy: [],
-              },
-              ...s.loans,
-            ],
+        loans: [loan, ...s.loans],
+        reminders: [
+          reminder({
+            userId: reservation.borrowerId,
+            operationId: loanId,
+            listingId: reservation.listingId,
+            kind: 'RECEIPT',
+            dueAt: deliveredAt,
+            href: `/loans/${loanId}`,
+          }),
+          ...removeOperationReminders(s.reminders, reservationId),
+        ],
         notifications: [
           notice(
             reservation.borrowerId,
-            'Entrega registrada',
-            'Revisa las evidencias y confirma que recibiste el objeto.',
-            `/loans/${loanId}`,
             'DELIVERY_REGISTERED',
+            `/loans/${loanId}`,
+            { item },
           ),
           ...s.notifications,
         ],
-      }));
-      return { ok: true, message: 'Entrega registrada.' };
+      });
+      return success('results.delivery.recorded', loanId);
     },
-    [state],
-  );
-  const confirmReceipt = useCallback(
-    (loanId: string) =>
-      setState((s) => {
-        const item = s.loans.find((l) => l.id === loanId);
-        if (
-          !item ||
-          item.status !== 'PENDING_RECEIPT' ||
-          item.borrowerId !== s.currentUserId
-        )
-          return s;
-        const confirmedAt = now();
-        return {
-          ...s,
-          loans: s.loans.map((l) =>
-            l.id === loanId
-              ? {
-                  ...l,
-                  status: statusAfterReceiptConfirmation(),
-                  paymentStatus: 'RELEASED',
-                  receiptConfirmedAt: confirmedAt,
-                  timeline: [
-                    ...l.timeline.map((t) => ({ ...t, complete: true })),
-                    {
-                      id: uid('timeline'),
-                      label: 'Préstamo activo · tarifa liberada',
-                      date: 'Ahora',
-                      complete: true,
-                    },
-                  ],
-                }
-              : l,
-          ),
-          reservations: s.reservations.map((r) =>
-            r.id === item.reservationId
-              ? {
-                  ...r,
-                  status: 'ACTIVATED',
-                  paymentStatus: 'RELEASED',
-                  receiptConfirmedAt: confirmedAt,
-                }
-              : r,
-          ),
-          transactions: [
-            tx(
-              item.lenderId,
-              loanId,
-              'RENTAL_RELEASE',
-              economicBreakdown(item.snapshot).fee,
-              s.reservations.find((r) => r.id === item.reservationId)
-                ?.paymentMethod ?? 'Yape',
-              'RELEASED',
-              item.reservationId,
-            ),
-            ...s.transactions,
-          ],
-          notifications: [
-            notice(
-              item.lenderId,
-              'Recepción confirmada',
-              'El préstamo está activo y la tarifa fue liberada.',
-              `/loans/${loanId}`,
-              'RECEIPT_CONFIRMED',
-            ),
-            notice(
-              item.lenderId,
-              'PrÃ©stamo activado',
-              'La operaciÃ³n ya estÃ¡ activa.',
-              `/loans/${loanId}`,
-              'LOAN_ACTIVATED',
-            ),
-            ...s.notifications,
-          ],
-          reminders: [
-            ...s.reminders.filter(
-              (reminder) => reminder.operationId !== item.reservationId,
-            ),
-            {
-              id: uid('reminder'),
-              userId: item.borrowerId,
-              operationId: loanId,
-              title: 'Devolución próxima',
-              dueAt: item.currentReturnAt,
-              kind: 'RETURN',
-              href: `/loans/${loanId}`,
-            },
-            {
-              id: uid('reminder'),
-              userId: item.lenderId,
-              operationId: loanId,
-              title: 'Recepción de devolución próxima',
-              dueAt: item.currentReturnAt,
-              kind: 'RETURN',
-              href: `/loans/${loanId}`,
-            },
-          ],
-        };
-      }),
-    [],
+    [commit],
   );
 
-  const requestExtension = useCallback(
-    (loanId: string, endAt: string) => {
-      const item = state.loans.find((l) => l.id === loanId);
-      const listing = state.listings.find((l) => l.id === item?.listingId);
-      if (!item || item.status !== 'ACTIVE')
-        return { ok: false, message: 'El préstamo debe estar activo.' };
-      if (item.borrowerId !== state.currentUserId)
-        return {
-          ok: false,
-          message: 'Solo el prestatario puede solicitar una extensión.',
-        };
-      if (new Date(item.currentReturnAt) <= new Date())
-        return {
-          ok: false,
-          message: 'No puedes extender un préstamo vencido.',
-        };
-      if (new Date(endAt) <= new Date(item.currentReturnAt))
-        return {
-          ok: false,
-          message: 'La nueva fecha debe ser posterior a la devolución vigente.',
-        };
+  const confirmReceipt = useCallback(
+    (loanId: string): ActionResult => {
+      const s = read();
+      const loan = s.loans.find((item) => item.id === loanId);
       if (
-        !listing ||
-        !isPeriodAvailable(
-          listing.availabilitySlots.filter(
-            (slot) => slot.reservationId !== item.reservationId,
-          ),
-          item.currentReturnAt,
-          endAt,
-        )
+        !loan ||
+        loan.status !== 'PENDING_RECEIPT' ||
+        loan.borrowerId !== s.currentUserId
       )
-        return {
-          ok: false,
-          message: 'El periodo adicional no está disponible.',
-        };
-      const extension = {
-        id: uid('extension'),
-        requesterId: item.borrowerId,
-        requestedAt: now(),
-        originalReturnAt: item.currentReturnAt,
-        proposedReturnAt: endAt,
-        additionalCost: extensionCost(
-          item.currentReturnAt,
-          endAt,
-          item.snapshot.dailyRate,
-        ),
-        status: 'PENDING' as const,
-      };
-      setState((s) => ({
+        return failure('results.gate.forbidden');
+      const confirmedAt = now();
+      const amounts = economicBreakdown(loan.snapshot);
+      const item = listingTitle(s, loan.listingId);
+      commit({
         ...s,
-        loans: s.loans.map((l) =>
-          l.id === loanId
+        loans: updateLoan(s, loanId, (l) => ({
+          ...l,
+          status: 'ACTIVE',
+          paymentStatus: 'RELEASED',
+          receiptConfirmedAt: confirmedAt,
+          timeline: [
+            ...l.timeline.filter((event) => event.event !== 'RECEIPT_PENDING'),
+            timelineEvent('RECEIPT_CONFIRMED'),
+          ],
+        })),
+        reservations: s.reservations.map((r) =>
+          r.id === loan.reservationId
             ? {
-                ...l,
-                extensionStatus: 'PENDING',
-                extensionEndAt: endAt,
-                extensions: [...l.extensions, extension],
+                ...r,
+                status: 'ACTIVATED',
+                paymentStatus: 'RELEASED',
+                receiptConfirmedAt: confirmedAt,
               }
-            : l,
+            : r,
         ),
-        notifications: [
-          notice(
-            item.lenderId,
-            'Extensión solicitada',
-            'El prestatario propuso una nueva fecha de devolución.',
-            `/loans/${loanId}`,
-            'EXTENSION_REQUESTED',
+        transactions: [
+          transaction({
+            userId: loan.lenderId,
+            loanId,
+            reservationId: loan.reservationId,
+            type: 'RENTAL_RELEASE',
+            amount: amounts.lenderPayout,
+            method: 'account_money',
+            status: 'RELEASED',
+          }),
+          ...s.transactions.map((tx) =>
+            tx.reservationId === loan.reservationId &&
+            tx.type === 'RENTAL_PAYMENT' &&
+            tx.status === 'PENDING_RELEASE'
+              ? {
+                  ...tx,
+                  status: 'RELEASED' as const,
+                  updatedAt: confirmedAt,
+                  loanId,
+                }
+              : tx,
           ),
+        ],
+        reminders: [
+          reminder({
+            userId: loan.borrowerId,
+            operationId: loanId,
+            listingId: loan.listingId,
+            kind: 'RETURN',
+            dueAt: loan.currentReturnAt,
+            href: `/loans/${loanId}`,
+          }),
+          reminder({
+            userId: loan.lenderId,
+            operationId: loanId,
+            listingId: loan.listingId,
+            kind: 'RETURN_RECEIPT',
+            dueAt: loan.currentReturnAt,
+            href: `/loans/${loanId}`,
+          }),
+          ...s.reminders.filter(
+            (r) => !(r.operationId === loanId && r.kind === 'RECEIPT'),
+          ),
+        ],
+        notifications: [
+          notice(loan.lenderId, 'RECEIPT_CONFIRMED', `/loans/${loanId}`, {
+            item,
+          }),
+          notice(loan.lenderId, 'RENTAL_RELEASED', '/transactions', { item }),
           ...s.notifications,
         ],
-      }));
-      return { ok: true, message: 'Extensión solicitada.' };
+      });
+      return success('results.loan.receiptConfirmed');
     },
-    [state],
+    [commit],
   );
-  const respondExtension = useCallback(
-    (loanId: string, accepted: boolean) =>
-      setState((s) => {
-        const item = s.loans.find((l) => l.id === loanId);
-        const pending = item?.extensions.findLast(
-          (e) => e.status === 'PENDING',
-        );
-        if (!item || !pending || item.lenderId !== s.currentUserId) return s;
-        const listing = s.listings.find(
-          (candidate) => candidate.id === item.listingId,
-        );
-        if (
-          accepted &&
-          (!listing ||
-            hasReservationCollision(
+
+  const otherReservationCollision = (
+    s: DemoState,
+    loan: Loan,
+    endAt: string,
+  ) => {
+    const listing = s.listings.find((item) => item.id === loan.listingId);
+    return (
+      !listing ||
+      hasReservationCollision(
+        listing.availabilitySlots,
+        loan.snapshot.startAt,
+        endAt,
+        loan.reservationId,
+      )
+    );
+  };
+
+  const applyReturnDate = (
+    s: DemoState,
+    loan: Loan,
+    endAt: string,
+  ): Partial<DemoState> => ({
+    listings: s.listings.map((listing) =>
+      listing.id === loan.listingId
+        ? {
+            ...listing,
+            availabilitySlots: replaceReservedInterval(
               listing.availabilitySlots,
-              item.currentReturnAt,
-              pending.proposedReturnAt,
-              item.reservationId,
-            ))
-        )
-          return s;
-        const finalStatus =
-          accepted && pending.additionalCost > 0
-            ? 'PAYMENT_PENDING'
-            : accepted
-              ? 'ACCEPTED'
-              : 'REJECTED';
-        return {
-          ...s,
-          loans: s.loans.map((l) =>
-            l.id === loanId
-              ? {
-                  ...l,
-                  extensionStatus: finalStatus,
-                  currentReturnAt:
-                    accepted && pending.additionalCost === 0
-                      ? pending.proposedReturnAt
-                      : l.currentReturnAt,
-                  extensions: l.extensions.map((e) =>
-                    e.id === pending.id
-                      ? {
-                          ...e,
-                          status: finalStatus,
-                          respondedAt: now(),
-                          paymentStatus:
-                            finalStatus === 'PAYMENT_PENDING'
-                              ? 'PENDING'
-                              : undefined,
-                          resultingReturnAt:
-                            finalStatus === 'ACCEPTED'
-                              ? e.proposedReturnAt
-                              : undefined,
-                        }
-                      : e,
-                  ),
-                }
-              : l,
-          ),
-          listings:
-            accepted && pending.additionalCost === 0
-              ? s.listings.map((listing) =>
-                  listing.id === item.listingId
-                    ? {
-                        ...listing,
-                        availabilitySlots: replaceReservedInterval(
-                          listing.availabilitySlots,
-                          item.reservationId,
-                          item.snapshot.startAt,
-                          pending.proposedReturnAt,
-                        ),
-                      }
-                    : listing,
-                )
-              : s.listings,
-          reminders:
-            accepted && pending.additionalCost === 0
-              ? updateReturnReminders(
-                  s.reminders,
-                  loanId,
-                  pending.proposedReturnAt,
-                )
-              : s.reminders,
-          notifications: [
-            notice(
-              item.borrowerId,
-              accepted ? 'Extensión aceptada' : 'Extensión rechazada',
-              accepted
-                ? pending.additionalCost > 0
-                  ? 'La extensión fue aprobada. Paga el costo adicional para activar la nueva fecha.'
-                  : 'La nueva fecha ya está vigente.'
-                : 'Se mantiene la fecha de devolución vigente.',
-              `/loans/${loanId}`,
-              accepted ? 'EXTENSION_ACCEPTED' : 'EXTENSION_REJECTED',
+              loan.reservationId,
+              loan.snapshot.startAt,
+              endAt,
             ),
-            ...s.notifications,
+          }
+        : listing,
+    ),
+    reminders: updateReturnReminders(s.reminders, loan.id, endAt),
+  });
+
+  const requestExtension = useCallback(
+    (loanId: string, endAt: string): ActionResult => {
+      const s = read();
+      const loan = s.loans.find((item) => item.id === loanId);
+      if (!loan || loan.borrowerId !== s.currentUserId)
+        return failure('results.gate.forbidden');
+      if (
+        loan.status !== 'ACTIVE' ||
+        new Date(loan.currentReturnAt) <= new Date()
+      )
+        return failure('results.extension.notActive');
+      if (
+        loan.extensions.some((ext) =>
+          ['PENDING', 'PAYMENT_PENDING'].includes(ext.status),
+        )
+      )
+        return failure('results.extension.alreadyPending');
+      if (new Date(endAt) <= new Date(loan.currentReturnAt))
+        return failure('results.extension.mustBeLater');
+      if (otherReservationCollision(s, loan, endAt))
+        return failure('results.extension.overlaps');
+      commit({
+        ...s,
+        loans: updateLoan(s, loanId, (l) => ({
+          ...l,
+          extensions: [
+            ...l.extensions,
+            {
+              id: uid('extension'),
+              requesterId: l.borrowerId,
+              requestedAt: now(),
+              originalReturnAt: l.currentReturnAt,
+              proposedReturnAt: endAt,
+              additionalCost: extensionCost(
+                l.currentReturnAt,
+                endAt,
+                l.snapshot.dailyRate,
+              ),
+              status: 'PENDING',
+            },
           ],
-        };
-      }),
-    [],
+        })),
+        notifications: [
+          notice(loan.lenderId, 'EXTENSION_REQUESTED', `/loans/${loanId}`, {
+            item: listingTitle(s, loan.listingId),
+          }),
+          ...s.notifications,
+        ],
+      });
+      return success('results.extension.requested');
+    },
+    [commit],
+  );
+
+  const respondExtension = useCallback(
+    (loanId: string, accepted: boolean): ActionResult => {
+      const s = read();
+      const loan = s.loans.find((item) => item.id === loanId);
+      const pending = loan?.extensions.find((ext) => ext.status === 'PENDING');
+      if (!loan || !pending || loan.lenderId !== s.currentUserId)
+        return failure('results.gate.forbidden');
+      if (
+        accepted &&
+        otherReservationCollision(s, loan, pending.proposedReturnAt)
+      )
+        return failure('results.extension.overlaps');
+      const status = !accepted
+        ? 'REJECTED'
+        : pending.additionalCost > 0
+          ? 'PAYMENT_PENDING'
+          : 'ACCEPTED';
+      const applyNow = status === 'ACCEPTED';
+      const event: NotificationEvent =
+        status === 'REJECTED'
+          ? 'EXTENSION_REJECTED'
+          : status === 'PAYMENT_PENDING'
+            ? 'EXTENSION_ACCEPTED_PAYMENT_PENDING'
+            : 'EXTENSION_ACCEPTED';
+      commit({
+        ...s,
+        ...(applyNow ? applyReturnDate(s, loan, pending.proposedReturnAt) : {}),
+        loans: updateLoan(s, loanId, (l) => ({
+          ...l,
+          currentReturnAt: applyNow
+            ? pending.proposedReturnAt
+            : l.currentReturnAt,
+          extensions: l.extensions.map((ext) =>
+            ext.id === pending.id
+              ? {
+                  ...ext,
+                  status,
+                  respondedAt: now(),
+                  paymentStatus:
+                    status === 'PAYMENT_PENDING' ? 'PENDING' : undefined,
+                  resultingReturnAt:
+                    status === 'REJECTED'
+                      ? l.currentReturnAt
+                      : applyNow
+                        ? ext.proposedReturnAt
+                        : undefined,
+                }
+              : ext,
+          ),
+        })),
+        notifications: [
+          notice(loan.borrowerId, event, `/loans/${loanId}`, {
+            item: listingTitle(s, loan.listingId),
+          }),
+          ...s.notifications,
+        ],
+      });
+      return success(
+        status === 'REJECTED'
+          ? 'results.extension.rejected'
+          : status === 'PAYMENT_PENDING'
+            ? 'results.extension.acceptedPaymentPending'
+            : 'results.extension.accepted',
+      );
+    },
+    [commit],
   );
 
   const payExtension = useCallback(
-    (loanId: string, method: string) => {
-      const item = state.loans.find((loan) => loan.id === loanId);
-      const pending = item?.extensions.findLast(
-        (extension) => extension.status === 'PAYMENT_PENDING',
+    async (
+      loanId: string,
+      methodId: string,
+      outcome?: ProviderOutcome,
+    ): Promise<ActionResult> => {
+      const initial = read().loans.find((item) => item.id === loanId);
+      if (!initial || initial.borrowerId !== read().currentUserId)
+        return failure('results.gate.forbidden');
+      const charge = await paymentsService.charge('EXTENSION', outcome);
+      const s = read();
+      const loan = s.loans.find((item) => item.id === loanId);
+      const payable = loan?.extensions.find(
+        (ext) => ext.status === 'PAYMENT_PENDING',
       );
-      const listing = state.listings.find(
-        (candidate) => candidate.id === item?.listingId,
-      );
-      if (!item || !pending || item.borrowerId !== state.currentUserId)
-        return {
-          ok: false,
-          message: 'No existe una extensión pendiente de pago.',
-        };
-      if (
-        !listing ||
-        hasReservationCollision(
-          listing.availabilitySlots,
-          item.currentReturnAt,
-          pending.proposedReturnAt,
-          item.reservationId,
-        )
-      )
-        return {
-          ok: false,
-          message: 'El periodo adicional ya no está disponible.',
-        };
-      setState((s) => ({
+      if (!loan || !payable) return failure('results.extension.nothingToPay');
+      if (otherReservationCollision(s, loan, payable.proposedReturnAt))
+        return failure('results.extension.overlaps');
+      const approved = charge.outcome === 'APPROVED';
+      const paymentTx = transaction({
+        userId: loan.borrowerId,
+        loanId,
+        reservationId: loan.reservationId,
+        type: 'EXTENSION_PAYMENT',
+        amount: payable.additionalCost,
+        method: methodId,
+        status: approved
+          ? 'RELEASED'
+          : paymentStatusFromOutcome(charge.outcome),
+        providerReference: charge.reference,
+      });
+      if (!approved) {
+        commit({
+          ...s,
+          loans: updateLoan(s, loanId, (l) => ({
+            ...l,
+            extensions: l.extensions.map((ext) =>
+              ext.id === payable.id
+                ? {
+                    ...ext,
+                    paymentStatus: paymentStatusFromOutcome(charge.outcome),
+                    paymentMethod: methodId,
+                  }
+                : ext,
+            ),
+          })),
+          transactions: [paymentTx, ...s.transactions],
+        });
+        return failure(`results.payment.${charge.outcome}` as MessageKey);
+      }
+      commit({
         ...s,
-        loans: s.loans.map((loan) =>
-          loan.id === loanId
-            ? {
-                ...loan,
-                currentReturnAt: dueAfterExtension(loan.currentReturnAt, {
-                  ...pending,
+        ...applyReturnDate(s, loan, payable.proposedReturnAt),
+        loans: updateLoan(s, loanId, (l) => ({
+          ...l,
+          currentReturnAt: payable.proposedReturnAt,
+          extensions: l.extensions.map((ext) =>
+            ext.id === payable.id
+              ? {
+                  ...ext,
                   status: 'ACCEPTED',
                   paymentStatus: 'RELEASED',
-                }),
-                extensionStatus: 'ACCEPTED',
-                extensions: loan.extensions.map((extension) =>
-                  extension.id === pending.id
-                    ? {
-                        ...extension,
-                        status: 'ACCEPTED',
-                        paymentStatus: 'RELEASED',
-                        paymentMethod: method,
-                        resultingReturnAt: pending.proposedReturnAt,
-                      }
-                    : extension,
-                ),
-              }
-            : loan,
-        ),
-        listings: s.listings.map((candidate) =>
-          candidate.id === item.listingId
-            ? {
-                ...candidate,
-                availabilitySlots: replaceReservedInterval(
-                  candidate.availabilitySlots,
-                  item.reservationId,
-                  item.snapshot.startAt,
-                  pending.proposedReturnAt,
-                ),
-              }
-            : candidate,
-        ),
-        reminders: updateReturnReminders(
-          s.reminders,
-          loanId,
-          pending.proposedReturnAt,
-        ),
-        transactions: [
-          tx(
-            item.borrowerId,
-            item.id,
-            'EXTENSION_PAYMENT',
-            pending.additionalCost,
-            method,
-            'RELEASED',
-            item.reservationId,
+                  paymentMethod: methodId,
+                  resultingReturnAt: ext.proposedReturnAt,
+                }
+              : ext,
           ),
-          ...s.transactions,
-        ],
+        })),
+        transactions: [paymentTx, ...s.transactions],
         notifications: [
           notice(
-            item.lenderId,
-            'Pago de extensión confirmado',
-            'La nueva fecha de devolución ya está vigente.',
-            `/loans/${loanId}`,
+            loan.lenderId,
             'EXTENSION_PAYMENT_CONFIRMED',
+            `/loans/${loanId}`,
+            { item: listingTitle(s, loan.listingId) },
           ),
           ...s.notifications,
         ],
-      }));
-      return { ok: true, message: 'Extensión pagada y fecha actualizada.' };
+      });
+      return success('results.extension.paid');
     },
-    [state],
+    [commit],
   );
 
   const proposeReschedule = useCallback(
-    (loanId: string, endAt: string) => {
-      const item = state.loans.find((l) => l.id === loanId);
+    (loanId: string, endAt: string): ActionResult => {
+      const s = read();
+      const loan = s.loans.find((item) => item.id === loanId);
+      if (!loan || loan.lenderId !== s.currentUserId)
+        return failure('results.gate.forbidden');
       if (
-        !item ||
-        item.status !== 'ACTIVE' ||
-        item.lenderId !== state.currentUserId
+        loan.status !== 'ACTIVE' ||
+        new Date(loan.currentReturnAt) <= new Date()
       )
-        return {
-          ok: false,
-          message:
-            'Solo el prestamista puede proponer una reprogramación en un préstamo activo.',
-        };
-      if (new Date(item.currentReturnAt) <= new Date())
-        return {
-          ok: false,
-          message: 'No puedes reprogramar un prÃ©stamo vencido.',
-        };
+        return failure('results.reschedule.notActive');
+      if (loan.reschedules.some((item) => item.status === 'PENDING'))
+        return failure('results.reschedule.alreadyPending');
       if (new Date(endAt) <= new Date())
-        return { ok: false, message: 'Selecciona una fecha futura.' };
-      const listing = state.listings.find(
-        (candidate) => candidate.id === item.listingId,
-      );
+        return failure('results.reschedule.mustBeFuture');
       if (
-        !listing ||
-        hasReservationCollision(
-          listing.availabilitySlots,
-          item.snapshot.startAt,
-          endAt,
-          item.reservationId,
-        )
+        new Date(endAt).getTime() === new Date(loan.currentReturnAt).getTime()
       )
-        return {
-          ok: false,
-          message: 'La fecha propuesta se superpone con otra reserva.',
-        };
-      setState((s) => ({
+        return failure('results.reschedule.sameDate');
+      if (otherReservationCollision(s, loan, endAt))
+        return failure('results.reschedule.overlaps');
+      commit({
         ...s,
-        loans: s.loans.map((l) =>
-          l.id === loanId
-            ? {
-                ...l,
-                reschedules: [
-                  ...l.reschedules,
-                  {
-                    id: uid('reschedule'),
-                    proposerId: l.lenderId,
-                    proposedAt: now(),
-                    originalReturnAt: l.currentReturnAt,
-                    proposedReturnAt: endAt,
-                    additionalCost: 0,
-                    status: 'PENDING',
-                  },
-                ],
-              }
-            : l,
-        ),
+        loans: updateLoan(s, loanId, (l) => ({
+          ...l,
+          reschedules: [
+            ...l.reschedules,
+            {
+              id: uid('reschedule'),
+              proposerId: l.lenderId,
+              proposedAt: now(),
+              originalReturnAt: l.currentReturnAt,
+              proposedReturnAt: endAt,
+              status: 'PENDING',
+            },
+          ],
+        })),
+        notifications: [
+          notice(loan.borrowerId, 'RESCHEDULE_PROPOSED', `/loans/${loanId}`, {
+            item: listingTitle(s, loan.listingId),
+          }),
+          ...s.notifications,
+        ],
+      });
+      return success('results.reschedule.proposed');
+    },
+    [commit],
+  );
+
+  const respondReschedule = useCallback(
+    (loanId: string, accepted: boolean): ActionResult => {
+      const s = read();
+      const loan = s.loans.find((item) => item.id === loanId);
+      const pending = loan?.reschedules.find(
+        (item) => item.status === 'PENDING',
+      );
+      if (!loan || !pending || loan.borrowerId !== s.currentUserId)
+        return failure('results.gate.forbidden');
+      if (
+        accepted &&
+        otherReservationCollision(s, loan, pending.proposedReturnAt)
+      )
+        return failure('results.reschedule.overlaps');
+      commit({
+        ...s,
+        ...(accepted ? applyReturnDate(s, loan, pending.proposedReturnAt) : {}),
+        loans: updateLoan(s, loanId, (l) => ({
+          ...l,
+          currentReturnAt: accepted
+            ? pending.proposedReturnAt
+            : l.currentReturnAt,
+          reschedules: l.reschedules.map((item) =>
+            item.id === pending.id
+              ? {
+                  ...item,
+                  status: accepted ? 'ACCEPTED' : 'REJECTED',
+                  respondedAt: now(),
+                  resultingReturnAt: accepted
+                    ? item.proposedReturnAt
+                    : l.currentReturnAt,
+                }
+              : item,
+          ),
+        })),
         notifications: [
           notice(
-            item.borrowerId,
-            'Propuesta de reprogramación',
-            'El prestamista propuso una nueva fecha sin costo adicional.',
+            loan.lenderId,
+            accepted ? 'RESCHEDULE_ACCEPTED' : 'RESCHEDULE_REJECTED',
             `/loans/${loanId}`,
-            'RESCHEDULE_PROPOSED',
+            { item: listingTitle(s, loan.listingId) },
           ),
           ...s.notifications,
         ],
-      }));
-      return { ok: true, message: 'Propuesta enviada.' };
+      });
+      return success(
+        accepted
+          ? 'results.reschedule.accepted'
+          : 'results.reschedule.rejected',
+      );
     },
-    [state],
-  );
-  const respondReschedule = useCallback(
-    (loanId: string, accepted: boolean) =>
-      setState((s) => {
-        const item = s.loans.find((l) => l.id === loanId);
-        const pending = item?.reschedules.findLast(
-          (r) => r.status === 'PENDING',
-        );
-        if (!item || !pending || item.borrowerId !== s.currentUserId) return s;
-        const listing = s.listings.find(
-          (candidate) => candidate.id === item.listingId,
-        );
-        if (
-          accepted &&
-          (!listing ||
-            hasReservationCollision(
-              listing.availabilitySlots,
-              item.snapshot.startAt,
-              pending.proposedReturnAt,
-              item.reservationId,
-            ))
-        )
-          return s;
-        return {
-          ...s,
-          loans: s.loans.map((l) =>
-            l.id === loanId
-              ? {
-                  ...l,
-                  currentReturnAt: accepted
-                    ? pending.proposedReturnAt
-                    : l.currentReturnAt,
-                  reschedules: l.reschedules.map((r) =>
-                    r.id === pending.id
-                      ? {
-                          ...r,
-                          status: accepted ? 'ACCEPTED' : 'REJECTED',
-                          respondedAt: now(),
-                        }
-                      : r,
-                  ),
-                }
-              : l,
-          ),
-          listings: accepted
-            ? s.listings.map((candidate) =>
-                candidate.id === item.listingId
-                  ? {
-                      ...candidate,
-                      availabilitySlots: replaceReservedInterval(
-                        candidate.availabilitySlots,
-                        item.reservationId,
-                        item.snapshot.startAt,
-                        pending.proposedReturnAt,
-                      ),
-                    }
-                  : candidate,
-              )
-            : s.listings,
-          reminders: accepted
-            ? updateReturnReminders(
-                s.reminders,
-                loanId,
-                pending.proposedReturnAt,
-              )
-            : s.reminders,
-          notifications: [
-            notice(
-              item.lenderId,
-              accepted ? 'Reprogramación aceptada' : 'Reprogramación rechazada',
-              accepted
-                ? 'La nueva fecha de devolución ya está vigente.'
-                : 'Se mantiene la fecha anterior.',
-              `/loans/${loanId}`,
-              accepted ? 'RESCHEDULE_ACCEPTED' : 'RESCHEDULE_REJECTED',
-            ),
-            ...s.notifications,
-          ],
-        };
-      }),
-    [],
+    [commit],
   );
 
   const recordReturn = useCallback(
@@ -1540,160 +1585,205 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       loanId: string,
       early: boolean,
       notes: string,
-      evidence: Evidence[] = [],
-    ) => {
-      const savedEvidence = persistentEvidence(evidence);
-      return setState((s) => {
-        const item = s.loans.find((l) => l.id === loanId);
-        if (
-          !item ||
-          !['ACTIVE', 'OVERDUE'].includes(item.status) ||
-          item.borrowerId !== s.currentUserId ||
-          notes.trim().length < 5 ||
-          !savedEvidence.some((evidence) => evidence.phase === 'FINAL')
-        )
-          return s;
-        const registeredAt = now();
-        return {
-          ...s,
-          loans: s.loans.map((l) =>
-            l.id === loanId
-              ? {
-                  ...l,
-                  status: 'RETURN_RECORDED',
-                  earlyReturn: early,
-                  actualReturnAt: registeredAt,
-                  returnRecord: { registeredAt, early, notes },
-                  evidence: [...l.evidence, ...savedEvidence],
-                  timeline: [
-                    ...l.timeline,
-                    {
-                      id: uid('timeline'),
-                      label: early
-                        ? 'Devolución anticipada registrada'
-                        : 'Devolución registrada',
-                      date: 'Ahora',
-                      complete: true,
-                    },
-                    {
-                      id: uid('timeline'),
-                      label: 'Confirmación del prestamista',
-                      date: 'Pendiente',
-                      complete: false,
-                    },
-                  ],
-                }
-              : l,
-          ),
-          notifications: [
-            notice(
-              item.lenderId,
-              early ? 'Devolución anticipada' : 'Devolución registrada',
-              'Revisa las evidencias finales y confirma la devolución.',
-              `/loans/${loanId}`,
-              early ? 'EARLY_RETURN_REGISTERED' : 'RETURN_REGISTERED',
-            ),
-            ...s.notifications,
+      evidence: Evidence[],
+    ): ActionResult => {
+      const s = read();
+      const loan = s.loans.find((item) => item.id === loanId);
+      if (!loan || loan.borrowerId !== s.currentUserId)
+        return failure('results.gate.forbidden');
+      if (!['ACTIVE', 'OVERDUE'].includes(loan.status))
+        return failure('results.return.notAllowed');
+      if (notes.trim().length < 10)
+        return failure('results.return.notesRequired');
+      if (!evidence.length) return failure('results.return.evidenceRequired');
+      const registeredAt = now();
+      commit({
+        ...s,
+        loans: updateLoan(s, loanId, (l) => ({
+          ...l,
+          status: 'RETURN_RECORDED',
+          earlyReturn: early,
+          actualReturnAt: registeredAt,
+          returnRecord: { registeredAt, early, notes: notes.trim() },
+          evidence: [
+            ...l.evidence,
+            ...evidence.map((entry) => ({ ...entry, phase: 'FINAL' as const })),
           ],
-        };
+          timeline: [
+            ...l.timeline,
+            timelineEvent(early ? 'EARLY_RETURN_RECORDED' : 'RETURN_RECORDED'),
+            timelineEvent('RETURN_CONFIRMATION_PENDING', false),
+          ],
+        })),
+        reminders: s.reminders.filter(
+          (r) => !(r.operationId === loanId && r.kind === 'RETURN'),
+        ),
+        notifications: [
+          notice(
+            loan.lenderId,
+            early ? 'EARLY_RETURN_REGISTERED' : 'RETURN_REGISTERED',
+            `/loans/${loanId}`,
+            { item: listingTitle(s, loan.listingId) },
+          ),
+          ...s.notifications,
+        ],
       });
+      return success('results.return.recorded');
     },
-    [],
+    [commit],
   );
-  const confirmReturn = useCallback(
-    (loanId: string) =>
-      setState((s) => {
-        const item = s.loans.find((l) => l.id === loanId);
-        if (
-          !item ||
-          item.status !== 'RETURN_RECORDED' ||
-          item.lenderId !== s.currentUserId
-        )
-          return s;
-        const unresolved = hasUnresolvedIncident(
-          s.incidents.filter((i) => i.loanId === loanId).map((i) => i.status),
-        );
-        const guaranteeStatus = unresolved ? 'HELD' : 'RELEASED';
-        const confirmedAt = now();
-        return {
-          ...s,
-          loans: s.loans.map((l) =>
-            l.id === loanId
-              ? {
-                  ...l,
-                  status: statusAfterReturnConfirmation(unresolved),
-                  guaranteeStatus,
-                  returnRecord: l.returnRecord
-                    ? { ...l.returnRecord, confirmedAt }
-                    : l.returnRecord,
-                  timeline: [
-                    ...l.timeline.map((t) => ({ ...t, complete: true })),
-                    {
-                      id: uid('timeline'),
-                      label: unresolved
-                        ? 'Devolución confirmada · pendiente de incidencia'
-                        : 'Préstamo finalizado · garantía liberada',
-                      date: 'Ahora',
-                      complete: true,
-                    },
-                  ],
-                }
-              : l,
-          ),
-          reservations: s.reservations.map((r) =>
-            r.id === item.reservationId
-              ? {
-                  ...r,
-                  status: unresolved ? r.status : 'COMPLETED',
-                  guaranteeStatus,
-                }
-              : r,
-          ),
-          listings: unresolved
-            ? s.listings
-            : s.listings.map((l) =>
-                l.id === item.listingId
-                  ? {
-                      ...l,
-                      availabilitySlots: releaseFutureAvailability(
-                        l.availabilitySlots,
-                        item,
-                        confirmedAt,
-                      ),
-                    }
-                  : l,
+
+  const finalizeGuarantee = (s: DemoState, loan: Loan, incidentId?: string) => {
+    const available = remainingGuarantee(s.incidents, loan);
+    const captured = loan.snapshot.guaranteeAmount - available;
+    const status =
+      loan.snapshot.guaranteeAmount === 0
+        ? ('NOT_REQUIRED' as const)
+        : captured === 0
+          ? ('RELEASED' as const)
+          : available === 0
+            ? ('CAPTURED' as const)
+            : ('PARTIALLY_CAPTURED' as const);
+    const releaseTx =
+      available > 0
+        ? [
+            transaction({
+              userId: loan.borrowerId,
+              loanId: loan.id,
+              reservationId: loan.reservationId,
+              incidentId,
+              type: 'GUARANTEE_RELEASE',
+              amount: available,
+              method:
+                s.reservations.find((r) => r.id === loan.reservationId)
+                  ?.guaranteePaymentMethod ?? '',
+              status: 'RELEASED',
+            }),
+          ]
+        : [];
+    return { status, releaseTx, released: available };
+  };
+
+  const completeLoan = (
+    s: DemoState,
+    loan: Loan,
+    confirmedAt: string,
+    incidentId?: string,
+  ): DemoState => {
+    const guarantee = finalizeGuarantee(s, loan, incidentId);
+    const item = listingTitle(s, loan.listingId);
+    return {
+      ...s,
+      loans: updateLoan(s, loan.id, (l) => ({
+        ...l,
+        status: 'COMPLETED',
+        completedAt: confirmedAt,
+        guaranteeStatus: guarantee.status,
+        timeline: [
+          ...l.timeline.map((event) => ({
+            ...event,
+            complete: true,
+            at: event.at ?? confirmedAt,
+          })),
+          timelineEvent('LOAN_COMPLETED'),
+        ],
+      })),
+      reservations: s.reservations.map((r) =>
+        r.id === loan.reservationId
+          ? { ...r, status: 'COMPLETED', guaranteeStatus: guarantee.status }
+          : r,
+      ),
+      listings: s.listings.map((listing) =>
+        listing.id === loan.listingId
+          ? {
+              ...listing,
+              availabilitySlots: releaseFutureAvailability(
+                listing.availabilitySlots,
+                loan,
+                confirmedAt,
               ),
-          transactions: unresolved
-            ? s.transactions
-            : [
-                tx(
-                  item.borrowerId,
-                  loanId,
-                  'GUARANTEE_RELEASE',
-                  item.snapshot.guaranteeAmount,
-                  s.reservations.find((r) => r.id === item.reservationId)
-                    ?.guaranteePaymentMethod ?? 'Método original',
-                  'RELEASED',
-                  item.reservationId,
-                ),
-                ...s.transactions,
-              ],
-          notifications: [
-            notice(
-              item.borrowerId,
-              'Devolución confirmada',
-              unresolved
-                ? 'La devolución fue confirmada; el préstamo y la garantía esperan la resolución de la incidencia.'
-                : 'El préstamo terminó y la garantía fue liberada.',
-              `/loans/${loanId}`,
-              unresolved ? 'RETURN_CONFIRMED' : 'LOAN_COMPLETED',
-            ),
-            ...s.notifications,
+            }
+          : listing,
+      ),
+      transactions: settleHold(
+        [...guarantee.releaseTx, ...s.transactions],
+        loan.reservationId,
+        guarantee.status,
+      ),
+      reminders: removeOperationReminders(s.reminders, loan.id),
+      notifications: [
+        notice(loan.borrowerId, 'LOAN_COMPLETED', `/loans/${loan.id}`, {
+          item,
+        }),
+        notice(loan.lenderId, 'LOAN_COMPLETED', `/loans/${loan.id}`, { item }),
+        ...s.notifications,
+      ],
+    };
+  };
+
+  const confirmReturn = useCallback(
+    (loanId: string): ActionResult => {
+      const s = read();
+      const loan = s.loans.find((item) => item.id === loanId);
+      if (
+        !loan ||
+        loan.status !== 'RETURN_RECORDED' ||
+        loan.lenderId !== s.currentUserId
+      )
+        return failure('results.gate.forbidden');
+      const unresolved = hasUnresolvedIncident(
+        s.incidents
+          .filter((incident) => incident.loanId === loanId)
+          .map((incident) => incident.status),
+      );
+      const confirmedAt = now();
+      const withConfirmation: DemoState = {
+        ...s,
+        loans: updateLoan(s, loanId, (l) => ({
+          ...l,
+          returnRecord: l.returnRecord
+            ? { ...l.returnRecord, confirmedAt }
+            : l.returnRecord,
+          timeline: l.timeline.filter(
+            (event) => event.event !== 'RETURN_CONFIRMATION_PENDING',
+          ),
+        })),
+      };
+      if (!unresolved) {
+        const confirmedLoan = withConfirmation.loans.find(
+          (item) => item.id === loanId,
+        ) as Loan;
+        commit(completeLoan(withConfirmation, confirmedLoan, confirmedAt));
+        return success('results.return.confirmedCompleted');
+      }
+      commit({
+        ...withConfirmation,
+        loans: updateLoan(withConfirmation, loanId, (l) => ({
+          ...l,
+          status: statusAfterReturnConfirmation(true),
+          guaranteeStatus: guaranteeAfterReturn(
+            true,
+            l.snapshot.guaranteeAmount,
+          ),
+          timeline: [
+            ...l.timeline,
+            timelineEvent('RETURN_CONFIRMED_PENDING_INCIDENT'),
           ],
-          reminders: removeOperationReminders(s.reminders, loanId),
-        };
-      }),
-    [],
+        })),
+        reminders: removeOperationReminders(s.reminders, loanId),
+        notifications: [
+          notice(
+            loan.borrowerId,
+            'RETURN_CONFIRMED_PENDING_INCIDENT',
+            `/loans/${loanId}`,
+            { item: listingTitle(s, loan.listingId) },
+          ),
+          ...s.notifications,
+        ],
+      });
+      return success('results.return.confirmedPendingIncident');
+    },
+    [commit],
   );
 
   const reportIncident = useCallback(
@@ -1701,98 +1791,104 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       loanId: string,
       type: Incident['type'],
       description: string,
-      evidence: Evidence[] = [],
-    ) => {
-      const sourceLoan = state.loans.find((loan) => loan.id === loanId);
-      if (
-        !sourceLoan ||
-        !isParticipant(sourceLoan, state.currentUserId) ||
-        description.trim().length < 10
-      )
-        return null;
+      evidence: Evidence[],
+    ): ActionResult => {
+      const s = read();
+      const loan = s.loans.find((item) => item.id === loanId);
+      if (!loan || !isParticipant(loan, s.currentUserId))
+        return failure('results.gate.forbidden');
+      if (loan.status === 'COMPLETED')
+        return failure('results.incident.loanClosed');
+      if (description.trim().length < 20)
+        return failure('results.incident.descriptionRequired');
       const id = `INC-${Math.floor(1000 + Math.random() * 8999)}`;
-      const savedEvidence = persistentEvidence(evidence);
-      setState((s) => {
-        const item = s.loans.find((l) => l.id === loanId);
-        if (!item || !isParticipant(item, s.currentUserId)) return s;
-        const other =
-          item.borrowerId === s.currentUserId ? item.lenderId : item.borrowerId;
-        return {
-          ...s,
-          incidents: [
-            {
-              id,
-              loanId,
-              type,
-              description,
-              evidence: savedEvidence,
-              reportedBy: s.currentUserId,
-              status: 'OPEN',
-              createdAt: now(),
-              adminNotes: [],
-              guaranteeAmount: item.snapshot.guaranteeAmount,
-            },
-            ...s.incidents,
-          ],
-          loans: s.loans.map((l) =>
-            l.id === loanId ? { ...l, guaranteeStatus: 'HELD' } : l,
+      const other = counterpartOf(loan, s.currentUserId);
+      const admins = s.users.filter((user) => user.role === 'ADMIN');
+      commit({
+        ...s,
+        incidents: [
+          {
+            id,
+            loanId,
+            type,
+            description: description.trim(),
+            evidence: evidence.map((entry) => ({
+              ...entry,
+              phase: 'INCIDENT' as const,
+            })),
+            reportedBy: s.currentUserId,
+            status: 'OPEN',
+            createdAt: now(),
+            adminNotes: [],
+            guaranteeAmount: loan.snapshot.guaranteeAmount,
+          },
+          ...s.incidents,
+        ],
+        loans: updateLoan(s, loanId, (l) => ({
+          ...l,
+          guaranteeStatus:
+            l.snapshot.guaranteeAmount > 0 ? 'HELD' : l.guaranteeStatus,
+        })),
+        notifications: [
+          notice(other, 'INCIDENT_CREATED', `/incidents/${id}`, {
+            incidentId: id,
+            item: listingTitle(s, loan.listingId),
+          }),
+          ...admins.map((admin) =>
+            notice(admin.id, 'INCIDENT_ADMIN_NEW', `/admin/incidents/${id}`, {
+              incidentId: id,
+            }),
           ),
-          notifications: [
-            notice(
-              other,
-              'Incidencia creada',
-              'Se registró una incidencia y la garantía permanecerá retenida.',
-              `/incidents/${id}`,
-              'INCIDENT_CREATED',
-            ),
-            notice(
-              'admin',
-              'Nueva incidencia',
-              `Revisa la incidencia ${id}.`,
-              `/admin/incidents/${id}`,
-              'INCIDENT_CREATED',
-            ),
-            ...s.notifications,
-          ],
-        };
+          ...s.notifications,
+        ],
       });
-      return id;
+      return success('results.incident.reported', id);
     },
-    [state.loans, state.currentUserId],
+    [commit],
   );
+
   const submitCounterpartyStatement = useCallback(
-    (incidentId: string, statement: string) => {
-      const incident = state.incidents.find((item) => item.id === incidentId);
-      const loan = state.loans.find((item) => item.id === incident?.loanId);
+    (incidentId: string, statement: string): ActionResult => {
+      const s = read();
+      const incident = s.incidents.find((item) => item.id === incidentId);
+      const loan = s.loans.find((item) => item.id === incident?.loanId);
       if (
         !incident ||
         !loan ||
         incident.status === 'RESOLVED' ||
-        incident.reportedBy === state.currentUserId ||
-        !isParticipant(loan, state.currentUserId) ||
-        statement.trim().length < 10
+        incident.reportedBy === s.currentUserId ||
+        !isParticipant(loan, s.currentUserId)
       )
-        return false;
-      setState((s) => ({
+        return failure('results.gate.forbidden');
+      if (statement.trim().length < 20)
+        return failure('results.incident.statementRequired');
+      commit({
         ...s,
         incidents: s.incidents.map((item) =>
           item.id === incidentId
-            ? { ...item, counterpartyStatement: statement.trim() }
+            ? {
+                ...item,
+                counterpartyStatement: statement.trim(),
+                counterpartyStatementAt: now(),
+              }
             : item,
         ),
-      }));
-      return true;
+      });
+      return success('results.incident.statementSaved');
     },
-    [state],
+    [commit],
   );
+
+  const isAdmin = (s: DemoState) => currentUserOf(s)?.role === 'ADMIN';
+
   const startIncidentReview = useCallback(
-    (incidentId: string) => {
-      const user = state.users.find((item) => item.id === state.currentUserId);
-      const incident = state.incidents.find((item) => item.id === incidentId);
-      const loan = state.loans.find((item) => item.id === incident?.loanId);
-      if (user?.role !== 'ADMIN' || incident?.status !== 'OPEN' || !loan)
-        return false;
-      setState((s) => ({
+    (incidentId: string): ActionResult => {
+      const s = read();
+      const incident = s.incidents.find((item) => item.id === incidentId);
+      const loan = s.loans.find((item) => item.id === incident?.loanId);
+      if (!isAdmin(s) || incident?.status !== 'OPEN' || !loan)
+        return failure('results.gate.forbidden');
+      commit({
         ...s,
         incidents: s.incidents.map((item) =>
           item.id === incidentId
@@ -1805,35 +1901,34 @@ export function DemoProvider({ children }: { children: ReactNode }) {
             : item,
         ),
         notifications: [
-          notice(
-            loan.borrowerId,
-            'Incidencia en revisiÃ³n',
-            'La revisiÃ³n administrativa ha comenzado.',
-            `/incidents/${incidentId}`,
-            'INCIDENT_UNDER_REVIEW',
-          ),
-          notice(
-            loan.lenderId,
-            'Incidencia en revisiÃ³n',
-            'La revisiÃ³n administrativa ha comenzado.',
-            `/incidents/${incidentId}`,
-            'INCIDENT_UNDER_REVIEW',
+          ...[loan.borrowerId, loan.lenderId].map((userId) =>
+            notice(
+              userId,
+              'INCIDENT_UNDER_REVIEW',
+              `/incidents/${incidentId}`,
+              { incidentId },
+            ),
           ),
           ...s.notifications,
         ],
-      }));
-      return true;
+      });
+      return success('results.incident.reviewStarted');
     },
-    [state],
+    [commit],
   );
+
   const addIncidentAdminNote = useCallback(
-    (incidentId: string, text: string) => {
-      const user = state.users.find((item) => item.id === state.currentUserId);
-      if (user?.role !== 'ADMIN' || text.trim().length < 3) return false;
-      setState((s) => ({
+    (incidentId: string, text: string): ActionResult => {
+      const s = read();
+      const incident = s.incidents.find((item) => item.id === incidentId);
+      if (!isAdmin(s) || incident?.status !== 'UNDER_REVIEW')
+        return failure('results.gate.forbidden');
+      if (text.trim().length < 5)
+        return failure('results.incident.noteRequired');
+      commit({
         ...s,
         incidents: s.incidents.map((item) =>
-          item.id === incidentId && item.status === 'UNDER_REVIEW'
+          item.id === incidentId
             ? {
                 ...item,
                 adminNotes: [
@@ -1848,353 +1943,195 @@ export function DemoProvider({ children }: { children: ReactNode }) {
               }
             : item,
         ),
-      }));
-      return true;
+      });
+      return success('results.incident.noteSaved');
     },
-    [state],
+    [commit],
   );
-  const saveAnalysis = useCallback(
-    (analysis: EvidenceAnalysis) =>
-      setState((s) => ({
-        ...s,
-        analyses: [
-          ...s.analyses.filter((a) => a.loanId !== analysis.loanId),
-          analysis,
-        ],
-      })),
-    [],
-  );
+
   const resolveIncident = useCallback(
     (
       id: string,
       decision: IncidentDecision,
       amount: number,
       justification: string,
-    ) => {
-      const incident = state.incidents.find((i) => i.id === id);
-      if (!incident) return { ok: false, message: 'Incidencia no encontrada.' };
-      const current = state.users.find(
-        (user) => user.id === state.currentUserId,
-      );
-      if (current?.role !== 'ADMIN' || incident.status !== 'UNDER_REVIEW')
-        return {
-          ok: false,
-          message: 'La incidencia debe estar en revisión administrativa.',
-        };
-      if (!justification.trim())
-        return { ok: false, message: 'La justificación es obligatoria.' };
-      const item = state.loans.find((l) => l.id === incident.loanId);
-      if (!item) return { ok: false, message: 'Préstamo no encontrado.' };
-      const alreadyCaptured = state.incidents
-        .filter(
-          (candidate) =>
-            candidate.loanId === item.id &&
-            candidate.id !== id &&
-            candidate.status === 'RESOLVED',
-        )
-        .reduce(
-          (sum, candidate) => sum + (candidate.resolution?.amount ?? 0),
-          0,
-        );
-      const remainingGuarantee = Math.max(
-        0,
-        item.snapshot.guaranteeAmount - alreadyCaptured,
-      );
-      if (
-        decision === 'PARTIAL' &&
-        !validPartialCapture(amount, remainingGuarantee)
-      )
-        return {
-          ok: false,
-          message:
-            'El monto parcial debe ser mayor a cero y no superar la garantía restante.',
-        };
+    ): ActionResult => {
+      const s = read();
+      const incident = s.incidents.find((item) => item.id === id);
+      const loan = s.loans.find((item) => item.id === incident?.loanId);
+      if (!incident || !loan || !isAdmin(s))
+        return failure('results.gate.forbidden');
+      if (incident.status !== 'UNDER_REVIEW')
+        return failure('results.incident.reviewRequired');
+      if (justification.trim().length < 20)
+        return failure('results.incident.justificationRequired');
+      const available = remainingGuarantee(s.incidents, loan, id);
+      if (decision === 'PARTIAL' && !validPartialCapture(amount, available))
+        return failure('results.incident.invalidAmount');
       const captured =
-        decision === 'TOTAL'
-          ? remainingGuarantee
-          : decision === 'PARTIAL'
-            ? amount
-            : 0;
-      const totalCaptured = alreadyCaptured + captured;
-      const resolvedGuaranteeStatus =
-        totalCaptured === 0
-          ? 'RELEASED'
-          : totalCaptured < item.snapshot.guaranteeAmount
-            ? 'PARTIALLY_CAPTURED'
-            : 'CAPTURED';
-      setState((s) => {
-        const remainingUnresolved = s.incidents.some(
-          (candidate) =>
-            candidate.loanId === item.id &&
-            candidate.id !== id &&
-            candidate.status !== 'RESOLVED',
-        );
-        const canComplete =
-          !remainingUnresolved && Boolean(item.returnRecord?.confirmedAt);
-        const guaranteeStatus = remainingUnresolved
-          ? ('HELD' as const)
-          : resolvedGuaranteeStatus;
-        return {
-          ...s,
-          incidents: s.incidents.map((i) =>
-            i.id === id
-              ? {
-                  ...i,
-                  status: 'RESOLVED',
-                  resolution: {
-                    decision,
-                    amount: captured,
-                    justification,
-                    resolvedAt: now(),
-                  },
-                }
-              : i,
+        decision === 'TOTAL' ? available : decision === 'PARTIAL' ? amount : 0;
+      const resolvedAt = now();
+      const captureTx =
+        captured > 0
+          ? [
+              transaction({
+                userId: loan.borrowerId,
+                loanId: loan.id,
+                reservationId: loan.reservationId,
+                incidentId: id,
+                type:
+                  captured >= available
+                    ? 'GUARANTEE_CAPTURE'
+                    : 'GUARANTEE_PARTIAL_CAPTURE',
+                amount: captured,
+                method:
+                  s.reservations.find((r) => r.id === loan.reservationId)
+                    ?.guaranteePaymentMethod ?? '',
+                status:
+                  captured >= available ? 'CAPTURED' : 'PARTIALLY_CAPTURED',
+              }),
+            ]
+          : [];
+      let next: DemoState = {
+        ...s,
+        incidents: s.incidents.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                status: 'RESOLVED',
+                resolution: {
+                  decision,
+                  amount: captured,
+                  refundedAmount: Math.max(0, available - captured),
+                  justification: justification.trim(),
+                  resolvedAt,
+                  resolvedBy: s.currentUserId,
+                },
+              }
+            : item,
+        ),
+        transactions: [...captureTx, ...s.transactions],
+        notifications: [
+          ...[loan.borrowerId, loan.lenderId].map((userId) =>
+            notice(userId, 'INCIDENT_RESOLVED', `/incidents/${id}`, {
+              incidentId: id,
+            }),
           ),
-          loans: s.loans.map((l) =>
-            l.id === item.id
-              ? {
-                  ...l,
-                  guaranteeStatus,
-                  status: canComplete
-                    ? statusAfterIncidentResolution(false)
-                    : l.status,
-                }
-              : l,
-          ),
-          reservations: s.reservations.map((r) =>
-            r.id === item.reservationId
-              ? {
-                  ...r,
-                  guaranteeStatus,
-                  status: canComplete ? 'COMPLETED' : r.status,
-                }
-              : r,
-          ),
-          listings: canComplete
-            ? s.listings.map((listing) =>
-                listing.id === item.listingId
-                  ? {
-                      ...listing,
-                      availabilitySlots: releaseFutureAvailability(
-                        listing.availabilitySlots,
-                        item,
-                        item.returnRecord?.confirmedAt ?? now(),
-                      ),
-                    }
-                  : listing,
-              )
-            : s.listings,
-          transactions: [
-            ...(!remainingUnresolved && totalCaptured === 0
-              ? [
-                  tx(
-                    item.borrowerId,
-                    item.id,
-                    'GUARANTEE_RELEASE',
-                    remainingGuarantee,
-                    'Método original',
-                    'RELEASED',
-                    item.reservationId,
-                    id,
-                  ),
-                ]
-              : []),
-            ...(!remainingUnresolved &&
-            totalCaptured > 0 &&
-            totalCaptured < item.snapshot.guaranteeAmount
-              ? [
-                  tx(
-                    item.borrowerId,
-                    item.id,
-                    'GUARANTEE_PARTIAL_CAPTURE',
-                    totalCaptured,
-                    'Método original',
-                    'PARTIALLY_CAPTURED',
-                    item.reservationId,
-                    id,
-                  ),
-                  tx(
-                    item.borrowerId,
-                    item.id,
-                    'GUARANTEE_RELEASE',
-                    remainingGuarantee - captured,
-                    'Método original',
-                    'RELEASED',
-                    item.reservationId,
-                    id,
-                  ),
-                ]
-              : []),
-            ...(!remainingUnresolved &&
-            totalCaptured >= item.snapshot.guaranteeAmount
-              ? [
-                  tx(
-                    item.borrowerId,
-                    item.id,
-                    'GUARANTEE_CAPTURE',
-                    item.snapshot.guaranteeAmount,
-                    'Método original',
-                    'CAPTURED',
-                    item.reservationId,
-                    id,
-                  ),
-                ]
-              : []),
-            ...s.transactions,
-          ],
-          notifications: [
-            notice(
-              item.borrowerId,
-              'Incidencia resuelta',
-              'La decisión administrativa ya está disponible.',
-              `/incidents/${id}`,
-              'INCIDENT_RESOLVED',
-            ),
-            notice(
-              item.lenderId,
-              'Incidencia resuelta',
-              'La decisión administrativa ya está disponible.',
-              `/incidents/${id}`,
-              'INCIDENT_RESOLVED',
-            ),
-            ...(canComplete
-              ? [
-                  notice(
-                    item.borrowerId,
-                    'PrÃ©stamo finalizado',
-                    'La incidencia fue resuelta y la operaciÃ³n finalizÃ³.',
-                    `/loans/${item.id}`,
-                    'LOAN_COMPLETED',
-                  ),
-                  notice(
-                    item.lenderId,
-                    'PrÃ©stamo finalizado',
-                    'La incidencia fue resuelta y la operaciÃ³n finalizÃ³.',
-                    `/loans/${item.id}`,
-                    'LOAN_COMPLETED',
-                  ),
-                ]
-              : []),
-            ...s.notifications,
-          ],
-        };
-      });
-      return { ok: true, message: 'Incidencia resuelta.' };
+          ...s.notifications,
+        ],
+      };
+      const othersOpen = next.incidents.some(
+        (item) => item.loanId === loan.id && item.status !== 'RESOLVED',
+      );
+      const objectLost =
+        decision === 'TOTAL' && ['LOSS', 'NON_RETURN'].includes(incident.type);
+      if (
+        !othersOpen &&
+        (loan.status === 'RETURN_CONFIRMED_PENDING_INCIDENT' || objectLost)
+      ) {
+        const current = next.loans.find((item) => item.id === loan.id) as Loan;
+        next = completeLoan(next, current, resolvedAt, id);
+      }
+      commit(next);
+      return success('results.incident.resolved');
     },
-    [state],
+    [commit],
+  );
+
+  const saveAnalysis = useCallback(
+    (analysis: EvidenceAnalysis) => {
+      const s = read();
+      commit({
+        ...s,
+        analyses: [
+          ...s.analyses.filter((item) => item.loanId !== analysis.loanId),
+          analysis,
+        ],
+      });
+    },
+    [commit],
   );
 
   const rateLoan = useCallback(
-    (loanId: string, stars: number, comment: string) => {
-      const item = state.loans.find((l) => l.id === loanId);
-      if (!item || item.status !== 'COMPLETED')
-        return {
-          ok: false,
-          message: 'Solo puedes calificar préstamos finalizados.',
-        };
-      if (stars < 1 || stars > 5)
-        return { ok: false, message: 'Selecciona entre 1 y 5 estrellas.' };
-      const targetUserId =
-        item.borrowerId === state.currentUserId
-          ? item.lenderId
-          : item.borrowerId;
-      if (!mayRateLoan(item, state.currentUserId, targetUserId))
-        return {
-          ok: false,
-          message: item.ratedBy.includes(state.currentUserId)
-            ? 'Ya calificaste esta operación.'
-            : 'Solo los participantes pueden calificar a su contraparte.',
-        };
-      const rating: Rating = {
-        id: uid('rating'),
-        stars,
-        comment,
-        authorId: state.currentUserId,
-        targetUserId,
-        loanId,
-        createdAt: now(),
-      };
-      setState((s) => {
-        const all = [...s.ratings, rating];
-        const targetRatings = all.filter(
-          (r) => r.targetUserId === targetUserId,
+    (loanId: string, stars: number, comment: string): ActionResult => {
+      const s = read();
+      const loan = s.loans.find((item) => item.id === loanId);
+      if (!loan) return failure('results.gate.forbidden');
+      if (stars < 1 || stars > 5) return failure('results.rating.invalidStars');
+      if (!mayRateLoan(loan, s.currentUserId))
+        return failure(
+          loan.ratedBy.includes(s.currentUserId)
+            ? 'results.rating.alreadyRated'
+            : 'results.rating.notAllowed',
         );
-        return {
-          ...s,
-          ratings: all,
-          loans: s.loans.map((l) =>
-            l.id === loanId
-              ? { ...l, ratedBy: [...l.ratedBy, s.currentUserId] }
-              : l,
-          ),
-          users: s.users.map((u) =>
-            u.id === targetUserId
-              ? {
-                  ...u,
-                  ratingCount: targetRatings.length,
-                  rating: Number(
-                    (
-                      targetRatings.reduce((sum, r) => sum + r.stars, 0) /
-                      targetRatings.length
-                    ).toFixed(1),
-                  ),
-                }
-              : u,
-          ),
-        };
+      const targetUserId = counterpartOf(loan, s.currentUserId);
+      commit({
+        ...s,
+        ratings: [
+          ...s.ratings,
+          {
+            id: uid('rating'),
+            stars,
+            comment: comment.trim(),
+            authorId: s.currentUserId,
+            targetUserId,
+            loanId,
+            createdAt: now(),
+          },
+        ],
+        loans: updateLoan(s, loanId, (l) => ({
+          ...l,
+          ratedBy: [...l.ratedBy, s.currentUserId],
+        })),
+        notifications: [
+          notice(targetUserId, 'RATING_RECEIVED', `/users/${targetUserId}`, {
+            item: listingTitle(s, loan.listingId),
+          }),
+          ...s.notifications,
+        ],
       });
-      return { ok: true, message: 'Calificación guardada.' };
+      return success('results.rating.saved');
     },
-    [state],
+    [commit],
   );
+
   const markNotification = useCallback(
-    (id?: string) =>
-      setState((s) => ({
+    (id?: string) => {
+      const s = read();
+      commit({
         ...s,
-        notifications: s.notifications.map((n) =>
-          (!id || n.id === id) && n.userId === s.currentUserId
-            ? { ...n, read: true }
-            : n,
+        notifications: s.notifications.map((item) =>
+          (!id || item.id === id) && item.userId === s.currentUserId
+            ? { ...item, read: true }
+            : item,
         ),
-      })),
-    [],
-  );
-  const mockRefreshDerivedStatuses = useCallback(
-    () =>
-      setState((s) => ({
-        ...s,
-        loans: s.loans.map((l) =>
-          shouldMarkOverdue(l.status, l.currentReturnAt, now())
-            ? { ...l, status: 'OVERDUE' }
-            : l,
-        ),
-      })),
-    [],
+      });
+    },
+    [commit],
   );
 
   const value = useMemo<DemoContextValue>(
     () => ({
       state,
       hydrated,
-      switchUser,
       login,
       logout,
+      switchUser,
       registerUser,
-      verifyCurrentUser,
-      setVerificationStatus,
+      requestVerification,
+      completeVerification,
       updateProfile,
       acceptTerms,
       resetDemo,
-      toggleListing,
-      archiveListing,
-      addListing,
+      createListing,
       updateListing,
+      setListingStatus,
       saveAvailability,
       createRequest,
       cancelRequest,
       respondRequest,
       cancelReservation,
-      payReservation,
+      payRental,
       holdGuarantee,
       recordDelivery,
       confirmReceipt,
@@ -2209,34 +2146,32 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       submitCounterpartyStatement,
       startIncidentReview,
       addIncidentAdminNote,
-      saveAnalysis,
       resolveIncident,
+      saveAnalysis,
       rateLoan,
       markNotification,
-      mockRefreshDerivedStatuses,
     }),
     [
       state,
       hydrated,
-      switchUser,
       login,
       logout,
+      switchUser,
       registerUser,
-      verifyCurrentUser,
-      setVerificationStatus,
+      requestVerification,
+      completeVerification,
       updateProfile,
       acceptTerms,
       resetDemo,
-      toggleListing,
-      archiveListing,
-      addListing,
+      createListing,
       updateListing,
+      setListingStatus,
       saveAvailability,
       createRequest,
       cancelRequest,
       respondRequest,
       cancelReservation,
-      payReservation,
+      payRental,
       holdGuarantee,
       recordDelivery,
       confirmReceipt,
@@ -2251,18 +2186,23 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       submitCounterpartyStatement,
       startIncidentReview,
       addIncidentAdminNote,
-      saveAnalysis,
       resolveIncident,
+      saveAnalysis,
       rateLoan,
       markNotification,
-      mockRefreshDerivedStatuses,
     ],
   );
+
   return <DemoContext.Provider value={value}>{children}</DemoContext.Provider>;
 }
 
 export function useDemo() {
   const value = useContext(DemoContext);
-  if (!value) throw new Error('useDemo debe utilizarse dentro de DemoProvider');
+  if (!value) throw new Error('useDemo must be used inside DemoProvider');
   return value;
+}
+
+export function useCurrentUser() {
+  const { state } = useDemo();
+  return currentUserOf(state);
 }

@@ -1,298 +1,559 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Link,
   useNavigate,
   useParams,
   useSearchParams,
 } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
+  ArrowLeft,
   ArrowRight,
   CalendarClock,
-  Camera,
   Check,
   CheckCircle2,
+  ChevronDown,
   CircleDollarSign,
+  ClipboardList,
   FileCheck2,
-  MapPin,
+  LayoutGrid,
+  Phone,
   RotateCcw,
   ShieldAlert,
   ShieldCheck,
   Star,
+  UsersRound,
   WalletCards,
   X,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
+  DefinitionList,
+  EconomicSummary,
   EmptyState,
   ErrorState,
-  EvidenceUploader,
+  Feedback,
   FinancialCard,
   LoadingSkeleton,
+  MapPreview,
+  NotFound,
   PageHeader,
   Reputation,
   StatusBadge,
   Timeline,
   UserChip,
-  money,
-  shortDate,
-  statusLabels,
 } from '@/components/lendup/shared';
 import {
-  evidenceAnalysisService,
-  paymentService,
-} from '@/services/domain-services';
+  AnalysisPanel,
+  EvidenceGallery,
+  EvidenceUploader,
+} from '@/components/lendup/evidence';
+import { ConfirmDialog, Field } from '@/components/lendup/forms';
+import { fromZonedInput, toZonedInput } from '@/lib/dates';
+import { appConfig } from '@/config/app-config';
+import { useEvidenceAnalysis } from '@/hooks/use-evidence-analysis';
+import { useOperationGate } from '@/hooks/use-operation-gate';
+import { usePaymentMethodLabel } from '@/hooks/use-payment-method-label';
+import { useI18n, type MessageKey } from '@/lib/i18n';
 import {
+  canCancelReservation,
+  canRetryPayment,
   canViewCounterpartyPhone,
+  cancellationRefund,
+  counterpartOf,
   economicBreakdown,
   extensionCost,
+  isPaymentSettled,
+  loanNextAction,
+  type LoanNextAction,
 } from '@/lib/business-rules';
-import { useDemo } from '@/stores/demo-store';
-import type { Evidence } from '@/types/domain';
+import {
+  providerOutcomes,
+  type PaymentMethod,
+} from '@/services/adapters/mercado-pago';
+import { campusCoordinates, findUniversity } from '@/services/catalog.service';
+import { paymentsService } from '@/services/payments.service';
+import { useDemo, type ActionResult } from '@/stores/demo-store';
+import {
+  currentUserOf,
+  incidentsOfLoan,
+  listingById,
+  loanHasOpenIncident,
+  reputationOf,
+  userById,
+} from '@/stores/selectors';
+import type {
+  Evidence,
+  Loan,
+  LoanRequest,
+  PaymentPurpose,
+  ProviderOutcome,
+  Reservation,
+  User,
+} from '@/types/domain';
+
+function roleLabel(isBorrower: boolean) {
+  return isBorrower ? 'operations.asBorrower' : 'operations.asLender';
+}
+
+function Tabs<T extends string>({
+  value,
+  options,
+  onChange,
+  label,
+}: {
+  value: T;
+  options: { value: T; label: string; count?: number }[];
+  onChange: (value: T) => void;
+  label: string;
+}) {
+  return (
+    <div className="tabs-bar" role="tablist" aria-label={label}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="tab"
+          aria-selected={value === option.value}
+          className={value === option.value ? 'active' : ''}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+          {option.count !== undefined && (
+            <span className="pill-count">{option.count}</span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PartyCard({
+  title,
+  user,
+  showPhone,
+}: {
+  title: string;
+  user?: User;
+  showPhone: boolean;
+}) {
+  const { t } = useI18n();
+  const { state } = useDemo();
+  if (!user) return null;
+  const reputation = reputationOf(state, user.id);
+  return (
+    <section className="panel">
+      <p className="eyebrow">{title}</p>
+      <UserChip
+        user={user}
+        link
+        detail={`${findUniversity(user.universityId)?.shortName ?? ''} · ${user.campus}`}
+      />
+      <Reputation value={reputation.average} count={reputation.count} />
+      {showPhone ? (
+        <div className="contact-card">
+          <Phone aria-hidden="true" />
+          <div>
+            <strong>{t('operations.contactTitle')}</strong>
+            <a href={`tel:${user.phone.replace(/\s/g, '')}`}>{user.phone}</a>
+          </div>
+        </div>
+      ) : (
+        <p className="muted small">{t('operations.phoneHidden')}</p>
+      )}
+    </section>
+  );
+}
 
 export function RequestsPage() {
+  const { t, formatDateTime } = useI18n();
   const { state, respondRequest, cancelRequest } = useDemo();
-  const [mode, setMode] = useState<'received' | 'sent'>('sent');
-  const requests = state.requests.filter((request) =>
-    mode === 'sent'
-      ? request.borrowerId === state.currentUserId
-      : request.lenderId === state.currentUserId,
+  const [params] = useSearchParams();
+  const { guard, dialog } = useOperationGate();
+  const received = state.requests.filter(
+    (request) => request.lenderId === state.currentUserId,
   );
+  const sent = state.requests.filter(
+    (request) => request.borrowerId === state.currentUserId,
+  );
+  const [tab, setTab] = useState<'sent' | 'received'>(
+    params.get('tab') === 'received' ||
+      (params.get('tab') !== 'sent' &&
+        received.some((r) => r.status === 'PENDING'))
+      ? 'received'
+      : 'sent',
+  );
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<{
+    id: string;
+    kind: 'accept' | 'reject' | 'cancel';
+  } | null>(null);
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const rows = (tab === 'sent' ? sent : received).sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt),
+  );
+  const target = state.requests.find(
+    (request) => request.id === pendingAction?.id,
+  );
+
+  const confirm = () => {
+    if (!pendingAction) return;
+    const run = () =>
+      setResult(
+        pendingAction.kind === 'cancel'
+          ? cancelRequest(pendingAction.id)
+          : respondRequest(pendingAction.id, pendingAction.kind === 'accept'),
+      );
+    setPendingAction(null);
+    if (pendingAction.kind === 'accept') guard(run);
+    else run();
+  };
+
   return (
     <>
       <PageHeader
-        eyebrow="Solicitudes"
-        title="Solicitudes de préstamo"
-        description="Una solicitud se convierte en reserva únicamente después de ser aceptada."
+        eyebrow={t('requests.eyebrow')}
+        title={t('requests.title')}
+        description={t('requests.description')}
       />
-      <div className="tabs-bar" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'sent'}
-          className={mode === 'sent' ? 'active' : ''}
-          onClick={() => setMode('sent')}
-        >
-          Enviadas
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'received'}
-          className={mode === 'received' ? 'active' : ''}
-          onClick={() => setMode('received')}
-        >
-          Recibidas
-        </button>
-      </div>
-      {requests.length ? (
-        <div className="operation-list">
-          {requests.map((request) => {
-            const item = state.listings.find(
-              (listing) => listing.id === request.listingId,
-            )!;
-            const person = state.users.find(
-              (user) =>
-                user.id ===
-                (mode === 'sent' ? request.lenderId : request.borrowerId),
-            );
-            return (
-              <article className="operation-card" key={request.id}>
-                <img src={item.image} alt={item.title} />
-                <div className="operation-main">
-                  <div className="operation-top">
-                    <StatusBadge status={request.status} />
-                    <span>{shortDate(request.createdAt)}</span>
-                  </div>
-                  <h2>{item.title}</h2>
-                  <UserChip user={person} />
-                  <div className="operation-facts">
-                    <span>
-                      <CalendarClock />
-                      {shortDate(request.startAt)} — {shortDate(request.endAt)}
-                    </span>
-                    <span>
-                      <CircleDollarSign />
-                      {money(request.snapshot.dailyRate)}/día
-                    </span>
-                    <span>
-                      <ShieldCheck />
-                      Garantía {money(request.snapshot.guaranteeAmount)}
-                    </span>
-                  </div>
-                </div>
-                <div className="operation-actions">
-                  <Button
-                    variant="outline"
-                    render={<Link to={`/objects/${item.id}`} />}
-                  >
-                    Ver objeto
-                  </Button>
-                  {mode === 'received' && request.status === 'PENDING' && (
-                    <>
-                      <Button onClick={() => respondRequest(request.id, true)}>
-                        <Check />
-                        Aceptar
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        onClick={() => respondRequest(request.id, false)}
-                      >
-                        <X />
-                        Rechazar
-                      </Button>
-                    </>
-                  )}
-                  {mode === 'sent' && request.status === 'PENDING' && (
-                    <Button
-                      variant="destructive"
-                      onClick={() => cancelRequest(request.id)}
-                    >
-                      Cancelar solicitud
-                    </Button>
-                  )}
-                  {request.status === 'ACCEPTED' && (
-                    <Button render={<Link to="/reservations" />}>
-                      Ver reserva <ArrowRight />
-                    </Button>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
+      <Tabs
+        label={t('requests.title')}
+        value={tab}
+        onChange={(value) => {
+          setTab(value);
+          setResult(null);
+        }}
+        options={[
+          {
+            value: 'received',
+            label: t('requests.received'),
+            count: received.filter((r) => r.status === 'PENDING').length,
+          },
+          {
+            value: 'sent',
+            label: t('requests.sent'),
+            count: sent.filter((r) => r.status === 'PENDING').length,
+          },
+        ]}
+      />
+      <Feedback result={result} />
+      {rows.length ? (
+        <ul className="operation-list">
+          {rows.map((request) => (
+            <RequestCard
+              key={request.id}
+              request={request}
+              mode={tab}
+              expanded={expanded === request.id}
+              onToggle={() =>
+                setExpanded((current) =>
+                  current === request.id ? null : request.id,
+                )
+              }
+              onAction={(kind) => setPendingAction({ id: request.id, kind })}
+            />
+          ))}
+        </ul>
       ) : (
         <EmptyState
-          title={`No tienes solicitudes ${mode === 'sent' ? 'enviadas' : 'recibidas'}`}
-          description={
-            mode === 'sent'
-              ? 'Explora objetos para enviar tu primera solicitud.'
-              : 'Las nuevas solicitudes aparecerán aquí.'
+          icon={ClipboardList}
+          title={
+            tab === 'sent'
+              ? t('requests.emptySentTitle')
+              : t('requests.emptyReceivedTitle')
           }
-          action={mode === 'sent' ? 'Explorar objetos' : undefined}
-          href="/explore"
+          description={
+            tab === 'sent'
+              ? t('requests.emptySentDescription')
+              : t('requests.emptyReceivedDescription')
+          }
+          action={tab === 'sent' ? t('nav.explore') : undefined}
+          href={tab === 'sent' ? '/explore' : undefined}
         />
       )}
+      <ConfirmDialog
+        open={Boolean(pendingAction)}
+        onOpenChange={(open) => !open && setPendingAction(null)}
+        title={
+          pendingAction ? t(`requests.confirm.${pendingAction.kind}.title`) : ''
+        }
+        description={
+          pendingAction && target
+            ? t(`requests.confirm.${pendingAction.kind}.description`, {
+                title: listingById(state, target.listingId)?.title ?? '',
+                period: `${formatDateTime(target.startAt)} – ${formatDateTime(target.endAt)}`,
+              })
+            : undefined
+        }
+        confirmLabel={
+          pendingAction
+            ? t(`requests.confirm.${pendingAction.kind}.action`)
+            : ''
+        }
+        destructive={pendingAction?.kind !== 'accept'}
+        onConfirm={confirm}
+      />
+      {dialog}
     </>
+  );
+}
+
+function RequestCard({
+  request,
+  mode,
+  expanded,
+  onToggle,
+  onAction,
+}: {
+  request: LoanRequest;
+  mode: 'sent' | 'received';
+  expanded: boolean;
+  onToggle: () => void;
+  onAction: (kind: 'accept' | 'reject' | 'cancel') => void;
+}) {
+  const { t, formatDateTime, formatMoney, formatRelative } = useI18n();
+  const { state } = useDemo();
+  const listing = listingById(state, request.listingId);
+  const person = userById(
+    state,
+    mode === 'sent' ? request.lenderId : request.borrowerId,
+  );
+  const reservation = state.reservations.find(
+    (item) => item.requestId === request.id,
+  );
+  const reputation = person ? reputationOf(state, person.id) : undefined;
+  const breakdown = economicBreakdown(request.snapshot);
+  const detailsId = `request-details-${request.id}`;
+  return (
+    <li className="operation-card panel">
+      <img src={listing?.image} alt="" />
+      <div className="operation-main">
+        <div className="operation-top">
+          <StatusBadge kind="request" status={request.status} />
+          <span className="muted small">
+            {t('requests.createdAgo', {
+              time: formatRelative(request.createdAt),
+            })}
+          </span>
+        </div>
+        <h2>
+          <Link to={`/objects/${request.listingId}`}>{listing?.title}</Link>
+        </h2>
+        <UserChip
+          user={person}
+          link
+          detail={t(mode === 'sent' ? 'roles.LENDER' : 'roles.BORROWER')}
+        />
+        <ul className="operation-facts">
+          <li>
+            <CalendarClock aria-hidden="true" />
+            {formatDateTime(request.startAt)} – {formatDateTime(request.endAt)}
+          </li>
+          <li>
+            <CircleDollarSign aria-hidden="true" />
+            {t('requests.totalRental', {
+              amount: formatMoney(breakdown.rentalCharge),
+            })}
+          </li>
+          <li>
+            <ShieldCheck aria-hidden="true" />
+            {request.snapshot.guaranteeAmount > 0
+              ? t('requests.guarantee', {
+                  amount: formatMoney(request.snapshot.guaranteeAmount),
+                })
+              : t('listing.noGuarantee')}
+          </li>
+        </ul>
+        {expanded && (
+          <div className="request-details" id={detailsId}>
+            {request.message && (
+              <blockquote>
+                <p>“{request.message}”</p>
+              </blockquote>
+            )}
+            {person && reputation && (
+              <DefinitionList
+                items={[
+                  [
+                    t('profile.verification'),
+                    person.verified
+                      ? t('profile.verified')
+                      : t('profile.notVerified'),
+                  ],
+                  [
+                    t('profile.reputation'),
+                    <Reputation
+                      key="rep"
+                      value={reputation.average}
+                      count={reputation.count}
+                    />,
+                  ],
+                  [t('profile.completedLoans'), reputation.completedLoans],
+                  [
+                    t('fields.university'),
+                    `${findUniversity(person.universityId)?.shortName ?? ''} · ${person.campus}`,
+                  ],
+                ]}
+              />
+            )}
+            <EconomicSummary breakdown={breakdown} />
+            <p className="muted small">
+              {t('requests.snapshotNotice', {
+                date: formatDateTime(request.snapshot.acceptedAt),
+              })}
+            </p>
+          </div>
+        )}
+      </div>
+      <div className="operation-actions">
+        <Button
+          variant="ghost"
+          aria-expanded={expanded}
+          aria-controls={detailsId}
+          onClick={onToggle}
+        >
+          <ChevronDown
+            aria-hidden="true"
+            className={expanded ? 'rotate' : ''}
+          />
+          {expanded ? t('common.hideDetails') : t('common.showDetails')}
+        </Button>
+        {mode === 'received' && request.status === 'PENDING' && (
+          <>
+            <Button onClick={() => onAction('accept')}>
+              <Check aria-hidden="true" />
+              {t('requests.accept')}
+            </Button>
+            <Button variant="destructive" onClick={() => onAction('reject')}>
+              <X aria-hidden="true" />
+              {t('requests.reject')}
+            </Button>
+          </>
+        )}
+        {mode === 'sent' && request.status === 'PENDING' && (
+          <Button variant="destructive" onClick={() => onAction('cancel')}>
+            {t('requests.cancel')}
+          </Button>
+        )}
+        {reservation && (
+          <Button render={<Link to={`/reservations/${reservation.id}`} />}>
+            {t('requests.viewReservation')}
+            <ArrowRight aria-hidden="true" />
+          </Button>
+        )}
+      </div>
+    </li>
   );
 }
 
 export function ReservationsPage() {
+  const { t, formatDateTime } = useI18n();
   const { state } = useDemo();
-  const rows = state.reservations.filter(
+  const [tab, setTab] = useState<'current' | 'history'>('current');
+  const mine = state.reservations.filter(
     (reservation) =>
       reservation.borrowerId === state.currentUserId ||
       reservation.lenderId === state.currentUserId,
   );
+  const current = mine.filter((reservation) =>
+    ['CONFIRMED', 'ACTIVATED'].includes(reservation.status),
+  );
+  const history = mine.filter((reservation) =>
+    ['CANCELLED', 'COMPLETED'].includes(reservation.status),
+  );
+  const rows = (tab === 'current' ? current : history).sort((a, b) =>
+    a.snapshot.startAt.localeCompare(b.snapshot.startAt),
+  );
   return (
     <>
       <PageHeader
-        eyebrow="Operaciones confirmadas"
-        title="Reservas"
-        description="Solicitudes aceptadas con condiciones congeladas."
+        eyebrow={t('reservations.eyebrow')}
+        title={t('reservations.title')}
+        description={t('reservations.description')}
+      />
+      <Tabs
+        label={t('reservations.title')}
+        value={tab}
+        onChange={setTab}
+        options={[
+          {
+            value: 'current',
+            label: t('reservations.current'),
+            count: current.length,
+          },
+          {
+            value: 'history',
+            label: t('reservations.history'),
+            count: history.length,
+          },
+        ]}
       />
       {rows.length ? (
-        <div className="reservation-grid">
+        <ul className="card-grid">
           {rows.map((reservation) => {
-            const item = state.listings.find(
-              (listing) => listing.id === reservation.listingId,
-            )!;
+            const listing = listingById(state, reservation.listingId);
             const isBorrower = reservation.borrowerId === state.currentUserId;
-            const loan = state.loans.find(
-              (candidate) => candidate.reservationId === reservation.id,
-            );
             return (
-              <article className="reservation-card" key={reservation.id}>
-                <img src={item.image} alt={item.title} />
+              <li className="reservation-card panel" key={reservation.id}>
+                <img src={listing?.image} alt="" />
                 <div className="reservation-body">
                   <div className="operation-top">
-                    <StatusBadge status={reservation.status} />
-                    <span>
-                      {isBorrower ? 'Como prestatario' : 'Como prestamista'}
-                    </span>
+                    <StatusBadge
+                      kind="reservation"
+                      status={reservation.status}
+                    />
+                    <span className="role-tag">{t(roleLabel(isBorrower))}</span>
                   </div>
-                  <h2>{item.title}</h2>
-                  <p>
-                    <CalendarClock />
-                    {shortDate(reservation.snapshot.startAt)} —{' '}
-                    {shortDate(reservation.snapshot.endAt)}
+                  <h2>{listing?.title}</h2>
+                  <p className="muted">
+                    <CalendarClock aria-hidden="true" />
+                    {formatDateTime(reservation.snapshot.startAt)} –{' '}
+                    {formatDateTime(reservation.snapshot.endAt)}
                   </p>
-                  <div className="mini-status">
-                    <span>
-                      <small>Pago</small>
-                      <StatusBadge status={reservation.paymentStatus} />
-                    </span>
-                    <span>
-                      <small>Garantía</small>
-                      <StatusBadge status={reservation.guaranteeStatus} />
-                    </span>
-                    <span>
-                      <small>Entrega</small>
-                      <strong>
-                        {reservation.deliveryRecorded
-                          ? 'Registrada'
-                          : 'Pendiente'}
-                      </strong>
-                    </span>
-                  </div>
-                  <div className="reservation-actions">
-                    <Button
-                      variant="outline"
-                      render={<Link to={`/reservations/${reservation.id}`} />}
-                    >
-                      Ver detalle
-                    </Button>
-                    {isBorrower &&
-                      reservation.paymentStatus === 'PENDING' &&
-                      reservation.status === 'CONFIRMED' && (
-                        <Button
-                          render={
-                            <Link
-                              to={`/reservations/${reservation.id}/checkout`}
-                            />
-                          }
-                        >
-                          Pagar
-                        </Button>
-                      )}
-                    {!isBorrower &&
-                      !reservation.deliveryRecorded &&
-                      reservation.paymentStatus === 'PENDING_RELEASE' &&
-                      ['HELD', 'NOT_REQUIRED'].includes(
-                        reservation.guaranteeStatus,
-                      ) && (
-                        <Button
-                          render={
-                            <Link
-                              to={`/loans/${loan?.id ?? 'new'}?delivery=${reservation.id}`}
-                            />
-                          }
-                        >
-                          Registrar entrega
-                        </Button>
-                      )}
-                  </div>
+                  <dl className="mini-status">
+                    <div>
+                      <dt>{t('finance.payment')}</dt>
+                      <dd>
+                        <StatusBadge
+                          kind="payment"
+                          status={reservation.paymentStatus}
+                        />
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('finance.guarantee')}</dt>
+                      <dd>
+                        <StatusBadge
+                          kind="guarantee"
+                          status={reservation.guaranteeStatus}
+                        />
+                      </dd>
+                    </div>
+                  </dl>
+                  <Button
+                    variant="outline"
+                    render={<Link to={`/reservations/${reservation.id}`} />}
+                  >
+                    {t('common.viewDetail')}
+                  </Button>
                 </div>
-              </article>
+              </li>
             );
           })}
-        </div>
+        </ul>
       ) : (
         <EmptyState
-          title="No tienes reservas confirmadas"
-          description="Cuando una solicitud sea aceptada, aparecerá aquí."
-          action="Explorar objetos"
+          icon={LayoutGrid}
+          title={
+            tab === 'current'
+              ? t('reservations.emptyTitle')
+              : t('reservations.emptyHistoryTitle')
+          }
+          description={t('reservations.emptyDescription')}
+          action={t('nav.explore')}
           href="/explore"
         />
       )}
@@ -300,458 +561,703 @@ export function ReservationsPage() {
   );
 }
 
+function ReservationActions({ reservation }: { reservation: Reservation }) {
+  const { t } = useI18n();
+  const { state } = useDemo();
+  const isBorrower = reservation.borrowerId === state.currentUserId;
+  const loan = state.loans.find(
+    (item) => item.reservationId === reservation.id,
+  );
+  const settled = isPaymentSettled(reservation);
+  if (loan)
+    return (
+      <Button render={<Link to={`/loans/${loan.id}`} />}>
+        {t('reservations.openLoan')}
+        <ArrowRight aria-hidden="true" />
+      </Button>
+    );
+  if (reservation.status !== 'CONFIRMED') return null;
+  if (isBorrower)
+    return settled ? (
+      <p className="inline-status success">
+        <CheckCircle2 aria-hidden="true" />
+        {t('reservations.readyForDelivery')}
+      </p>
+    ) : (
+      <Button render={<Link to={`/reservations/${reservation.id}/checkout`} />}>
+        <WalletCards aria-hidden="true" />
+        {t('reservations.pay')}
+      </Button>
+    );
+  return settled ? (
+    <Button render={<Link to={`/delivery?reservation=${reservation.id}`} />}>
+      <FileCheck2 aria-hidden="true" />
+      {t('reservations.recordDelivery')}
+    </Button>
+  ) : (
+    <p className="inline-status warning">
+      <CalendarClock aria-hidden="true" />
+      {t('reservations.waitingPayment')}
+    </p>
+  );
+}
+
 export function ReservationDetailPage() {
+  const { t, formatDateTime, formatMoney } = useI18n();
   const { id } = useParams();
   const { state, cancelReservation } = useDemo();
-  const reservation = state.reservations.find((item) => item.id === id);
+  const methodLabel = usePaymentMethodLabel();
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [reason, setReason] = useState('Cambio de planes');
-  const [message, setMessage] = useState('');
+  const [reason, setReason] = useState('');
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const reservation = state.reservations.find((item) => item.id === id);
   if (!reservation)
     return (
-      <EmptyState
-        title="Reserva no encontrada"
-        description="Esta operación no está disponible."
+      <NotFound
+        title={t('reservations.notFound')}
+        description={t('errors.notFound.description')}
       />
     );
-  const item = state.listings.find(
-    (listing) => listing.id === reservation.listingId,
-  )!;
-  const counterpart = state.users.find(
-    (user) =>
-      user.id ===
-      (reservation.borrowerId === state.currentUserId
-        ? reservation.lenderId
-        : reservation.borrowerId),
+  const listing = listingById(state, reservation.listingId);
+  const isBorrower = reservation.borrowerId === state.currentUserId;
+  const counterpart = userById(
+    state,
+    counterpartOf(reservation, state.currentUserId),
   );
   const breakdown = economicBreakdown(reservation.snapshot);
-  const loan = state.loans.find(
-    (candidate) => candidate.reservationId === reservation.id,
+  const refund = cancellationRefund(
+    reservation,
+    isBorrower ? 'BORROWER' : 'LENDER',
   );
-  const canCancel =
-    reservation.status === 'CONFIRMED' &&
-    !reservation.receiptConfirmedAt &&
-    loan?.status !== 'ACTIVE';
+  const canCancel = canCancelReservation(reservation);
+  const cancelledBy = userById(state, reservation.cancelledBy);
+
   return (
     <>
+      <Link className="back-link" to="/reservations">
+        <ArrowLeft aria-hidden="true" />
+        {t('reservations.back')}
+      </Link>
       <PageHeader
-        eyebrow={`Reserva ${reservation.id.toUpperCase()}`}
-        title={item.title}
-        description="Detalle de la operación confirmada."
-        action={<StatusBadge status={reservation.status} />}
+        eyebrow={`${t('reservations.eyebrowDetail')} · ${t(roleLabel(isBorrower))}`}
+        title={listing?.title ?? ''}
+        description={`${formatDateTime(reservation.snapshot.startAt)} – ${formatDateTime(reservation.snapshot.endAt)}`}
+        action={<StatusBadge kind="reservation" status={reservation.status} />}
       />
-      <div className="info-banner immutable">
-        <FileCheck2 />
-        <p>
-          <strong>Condiciones confirmadas e inmutables.</strong> Estas
-          condiciones corresponden al momento en que la reserva fue confirmada.
-        </p>
+      <Feedback result={result} />
+      {reservation.status === 'CANCELLED' && (
+        <div className="app-banner danger">
+          <X aria-hidden="true" />
+          <p>
+            {t('reservations.cancelledBy', {
+              name: cancelledBy?.name ?? '',
+              date: formatDateTime(reservation.cancelledAt),
+              reason: reservation.cancellationReason ?? '',
+            })}
+          </p>
+        </div>
+      )}
+      <div className="app-banner info">
+        <FileCheck2 aria-hidden="true" />
+        <p>{t('reservations.snapshotNotice')}</p>
+      </div>
+      <div className="action-panel panel">
+        <div>
+          <p className="eyebrow">{t('operations.nextStep')}</p>
+          <p>
+            {t(
+              isBorrower
+                ? 'reservations.borrowerSteps'
+                : 'reservations.lenderSteps',
+            )}
+          </p>
+        </div>
+        <div className="button-row">
+          <ReservationActions reservation={reservation} />
+          {canCancel && (
+            <Button variant="destructive" onClick={() => setCancelOpen(true)}>
+              {t('reservations.cancel')}
+            </Button>
+          )}
+        </div>
       </div>
       <div className="detail-grid">
         <section className="panel">
-          <span className="eyebrow">Fechas acordadas</span>
-          <h2>{shortDate(reservation.snapshot.startAt)}</h2>
-          <p>hasta {shortDate(reservation.snapshot.endAt)}</p>
-          <p>
-            <MapPin />
-            {reservation.snapshot.exchangePlace}
-          </p>
-        </section>
-        <section className="panel">
-          <span className="eyebrow">Contraparte</span>
-          <UserChip user={counterpart} detail />
-          <Reputation
-            value={counterpart?.rating ?? 0}
-            count={counterpart?.ratingCount}
+          <p className="eyebrow">{t('operations.periodAndPlace')}</p>
+          <DefinitionList
+            items={[
+              [t('fields.from'), formatDateTime(reservation.snapshot.startAt)],
+              [t('fields.to'), formatDateTime(reservation.snapshot.endAt)],
+            ]}
           />
-          {canViewCounterpartyPhone(reservation, state.currentUserId) && (
-            <div className="contact-card">
-              <strong>Coordinación de entrega</strong>
-              <span>Teléfono: {counterpart?.phone}</span>
-            </div>
-          )}
-        </section>
-        <FinancialCard
-          type="payment"
-          amount={breakdown.fee + breakdown.serviceFee}
-          status={reservation.paymentStatus}
-          note={
-            reservation.paymentStatus === 'PENDING_RELEASE'
-              ? 'Pago confirmado — pendiente de liberación al prestamista.'
-              : reservation.paymentStatus === 'RELEASED'
-                ? 'Tarifa liberada al prestamista.'
-                : reservation.paymentStatus === 'REFUNDED'
-                  ? 'Tarifa reembolsada.'
-                  : 'Completa el pago para continuar.'
-          }
-        />
-        <FinancialCard
-          type="guarantee"
-          amount={reservation.snapshot.guaranteeAmount}
-          status={reservation.guaranteeStatus}
-          note="La garantía se mantiene separada de la tarifa."
-        />
-        <section className="panel conditions-panel full">
-          <span className="eyebrow">Condiciones congeladas</span>
-          <dl>
-            <div>
-              <dt>Uso</dt>
-              <dd>{reservation.snapshot.usage}</dd>
-            </div>
-            <div>
-              <dt>Entrega</dt>
-              <dd>{reservation.snapshot.delivery}</dd>
-            </div>
-            <div>
-              <dt>Devolución</dt>
-              <dd>{reservation.snapshot.returnPolicy}</dd>
-            </div>
-            <div>
-              <dt>Cancelación</dt>
-              <dd>{reservation.snapshot.cancellation}</dd>
-            </div>
-          </dl>
-        </section>
-      </div>
-      <div className="sticky-actions">
-        {reservation.paymentStatus === 'PENDING' &&
-          reservation.status === 'CONFIRMED' && (
-            <Button
-              render={<Link to={`/reservations/${reservation.id}/checkout`} />}
-            >
-              Completar pago
-            </Button>
-          )}
-        {canCancel && (
-          <Button variant="destructive" onClick={() => setCancelOpen(true)}>
-            Cancelar reserva
-          </Button>
-        )}{' '}
-        {!canCancel && reservation.status === 'ACTIVATED' && (
-          <span className="muted">
-            La cancelación ya no está disponible después de confirmar la
-            recepción.
-          </span>
-        )}
-        <Button variant="outline" render={<Link to="/reservations" />}>
-          Volver
-        </Button>
-      </div>
-      {message && <output className="action-message">{message}</output>}
-      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Cancelar esta reserva</DialogTitle>
-            <DialogDescription>
-              Se liberará el periodo, se reembolsará la tarifa aplicable y se
-              devolverá la garantía.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="economic-summary">
-            <div>
-              <span>Tarifa y comisión</span>
-              <strong>{money(breakdown.fee + breakdown.serviceFee)}</strong>
-            </div>
-            <div>
-              <span>Garantía</span>
-              <strong>{money(breakdown.guarantee)}</strong>
-            </div>
-          </div>
-          <label className="field">
-            <span>Motivo</span>
-            <textarea
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
+          {listing && (
+            <MapPreview
+              place={reservation.snapshot.exchangePlace}
+              coordinates={campusCoordinates(
+                listing.universityId,
+                listing.campus,
+              )}
             />
-          </label>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCancelOpen(false)}>
-              Volver
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={!reason.trim()}
-              onClick={() => {
-                const result = cancelReservation(reservation.id, reason);
-                setMessage(result.message);
-                setCancelOpen(false);
-              }}
-            >
-              Confirmar cancelación
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          )}
+        </section>
+        <PartyCard
+          title={t(isBorrower ? 'roles.LENDER' : 'roles.BORROWER')}
+          user={counterpart}
+          showPhone={canViewCounterpartyPhone(reservation, state.currentUserId)}
+        />
+        <section className="panel">
+          <p className="eyebrow">{t('finance.breakdown')}</p>
+          <EconomicSummary breakdown={breakdown} />
+          {!isBorrower && (
+            <p className="muted small">
+              {t('finance.lenderPayout', {
+                amount: formatMoney(breakdown.lenderPayout),
+              })}
+            </p>
+          )}
+        </section>
+        <div className="stack">
+          <FinancialCard
+            type="payment"
+            amount={breakdown.rentalCharge}
+            status={reservation.paymentStatus}
+            method={
+              reservation.paymentMethod
+                ? methodLabel(reservation.paymentMethod)
+                : undefined
+            }
+            note={t(
+              `finance.paymentNotes.${reservation.paymentStatus}` as MessageKey,
+            )}
+          />
+          <FinancialCard
+            type="guarantee"
+            amount={breakdown.guarantee}
+            status={reservation.guaranteeStatus}
+            method={
+              reservation.guaranteePaymentMethod
+                ? methodLabel(reservation.guaranteePaymentMethod)
+                : undefined
+            }
+            note={t(
+              `finance.guaranteeNotes.${reservation.guaranteeStatus}` as MessageKey,
+            )}
+          />
+        </div>
+        <section className="panel conditions-panel full">
+          <p className="eyebrow">{t('operations.frozenConditions')}</p>
+          <DefinitionList
+            items={[
+              [t('fields.usage'), reservation.snapshot.usage],
+              [t('fields.delivery'), reservation.snapshot.delivery],
+              [t('fields.returnPolicy'), reservation.snapshot.returnPolicy],
+              [t('fields.cancellation'), reservation.snapshot.cancellation],
+              [t('fields.exchangePlace'), reservation.snapshot.exchangePlace],
+            ]}
+          />
+        </section>
+      </div>
+      <ConfirmDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        title={t('reservations.cancelTitle')}
+        description={t(
+          isBorrower
+            ? 'reservations.cancelDescriptionBorrower'
+            : 'reservations.cancelDescriptionLender',
+        )}
+        confirmLabel={t('reservations.cancelConfirm')}
+        destructive
+        disabled={reason.trim().length < 5}
+        onConfirm={() => {
+          setResult(cancelReservation(reservation.id, reason));
+          setCancelOpen(false);
+        }}
+      >
+        <dl className="economic-summary">
+          <div>
+            <dt>{t('reservations.refundRental')}</dt>
+            <dd>{formatMoney(refund.rentalRefund)}</dd>
+          </div>
+          <div>
+            <dt>{t('reservations.refundGuarantee')}</dt>
+            <dd>{formatMoney(refund.guaranteeRelease)}</dd>
+          </div>
+        </dl>
+        <Field
+          label={t('reservations.reason')}
+          hint={t('reservations.reasonHint')}
+          required
+        >
+          <textarea
+            rows={3}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </Field>
+      </ConfirmDialog>
     </>
   );
 }
 
-export function CheckoutPage() {
-  const { id } = useParams();
-  const { state, payReservation, holdGuarantee } = useDemo();
-  const navigate = useNavigate();
-  const reservation = state.reservations.find((item) => item.id === id);
+function MethodPicker({
+  purpose,
+  value,
+  onChange,
+  name,
+}: {
+  purpose: PaymentPurpose;
+  value: string;
+  onChange: (id: string) => void;
+  name: string;
+}) {
+  const { t } = useI18n();
+  const methodLabel = usePaymentMethodLabel();
   const {
     data: methods = [],
     isLoading,
     isError,
     refetch,
   } = useQuery({
-    queryKey: ['payment-methods'],
-    queryFn: () => paymentService.getAvailablePaymentMethods(),
+    queryKey: ['payment-methods', purpose],
+    queryFn: () => paymentsService.getPaymentMethods(purpose),
   });
-  const [paymentMethod, setPaymentMethod] = useState('yape');
-  const [guaranteeMethod, setGuaranteeMethod] = useState('plin');
-  const [processing, setProcessing] = useState(false);
-  if (!reservation)
-    return (
-      <EmptyState
-        title="Reserva no encontrada"
-        description="No se puede completar este pago."
-      />
-    );
-  const item = state.listings.find(
-    (listing) => listing.id === reservation.listingId,
-  )!;
-  const breakdown = economicBreakdown(reservation.snapshot);
+  useEffect(() => {
+    if (methods.length && !methods.some((method) => method.id === value))
+      onChange(methods[0].id);
+  }, [methods, value, onChange]);
+  if (isLoading) return <LoadingSkeleton cards={1} />;
+  if (isError) return <ErrorState onRetry={() => refetch()} />;
+  if (!methods.length)
+    return <p className="muted">{t('payments.noMethods')}</p>;
+  const selected = value;
   return (
-    <>
-      <PageHeader
-        eyebrow="Pago simulado"
-        title={`Completa tu reserva · ${item.title}`}
-        description="No se guarda información financiera sensible."
-      />
-      <div className="checkout-layout">
-        <section className="panel">
-          <h2>Medio para la tarifa</h2>
-          {isLoading ? (
-            <LoadingSkeleton cards={1} />
-          ) : isError ? (
-            <ErrorState onRetry={() => refetch()} />
-          ) : methods.length === 0 ? (
-            <EmptyState
-              title="No hay medios disponibles"
-              description="El proveedor de pagos no devolvió opciones. Intenta nuevamente más tarde."
-            />
-          ) : (
-            <div className="payment-methods">
-              {methods.map((method) => (
-                <label
-                  key={method.id}
-                  className={paymentMethod === method.id ? 'selected' : ''}
-                >
-                  <input
-                    type="radio"
-                    checked={paymentMethod === method.id}
-                    onChange={() => setPaymentMethod(method.id)}
-                  />
-                  <WalletCards />
-                  <span>
-                    <strong>{method.label}</strong>
-                    <small>Método demo</small>
-                  </span>
-                </label>
-              ))}
-            </div>
+    <fieldset className="payment-methods">
+      <legend className="sr-only">{t('payments.chooseMethod')}</legend>
+      {methods.map((method) => (
+        <label
+          key={method.id}
+          className={selected === method.id ? 'selected' : ''}
+        >
+          <input
+            type="radio"
+            name={name}
+            checked={selected === method.id}
+            onChange={() => onChange(method.id)}
+          />
+          <WalletCards aria-hidden="true" />
+          <span>
+            <strong>{methodLabel(method)}</strong>
+            <small>{t(`payments.methodHints.${method.kind}`)}</small>
+          </span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
+function OutcomePicker({
+  value,
+  onChange,
+}: {
+  value: ProviderOutcome;
+  onChange: (value: ProviderOutcome) => void;
+}) {
+  const { t } = useI18n();
+  if (!appConfig.demoMode) return null;
+  return (
+    <Field label={t('demo.providerResponse')} hint={t('demo.providerHint')}>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value as ProviderOutcome)}
+      >
+        {providerOutcomes.map((outcome) => (
+          <option key={outcome} value={outcome}>
+            {t(`payments.outcomes.${outcome}`)}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
+function PaymentStep({
+  purpose,
+  step,
+  title,
+  amount,
+  status,
+  done,
+  locked = false,
+  onPay,
+}: {
+  purpose: PaymentPurpose;
+  step: number;
+  title: string;
+  amount: number;
+  status: string;
+  done: boolean;
+  locked?: boolean;
+  onPay: (methodId: string, outcome: ProviderOutcome) => Promise<ActionResult>;
+}) {
+  const { t, formatMoney } = useI18n();
+  const [methodId, setMethodId] = useState('');
+  const [outcome, setOutcome] = useState<ProviderOutcome>('APPROVED');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ActionResult | null>(null);
+  return (
+    <section
+      className={`panel payment-step ${done ? 'done' : ''} ${locked ? 'locked' : ''}`}
+    >
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">
+            {t('checkout.step', { number: step })} · {title}
+          </p>
+          <h2>{formatMoney(amount)}</h2>
+        </div>
+        <StatusBadge
+          kind={purpose === 'GUARANTEE' ? 'guarantee' : 'payment'}
+          status={status}
+        />
+      </div>
+      {done ? (
+        <p className="inline-status success">
+          <CheckCircle2 aria-hidden="true" />
+          {t(
+            purpose === 'GUARANTEE'
+              ? 'checkout.guaranteeDone'
+              : 'checkout.rentalDone',
           )}
-          {reservation.snapshot.guaranteeAmount > 0 &&
-            !isLoading &&
-            !isError && (
-              <>
-                <h2>Medio para la garantía</h2>
-                <div className="payment-methods">
-                  {methods.map((method) => (
-                    <label
-                      key={`guarantee-${method.id}`}
-                      className={
-                        guaranteeMethod === method.id ? 'selected' : ''
-                      }
-                    >
-                      <input
-                        type="radio"
-                        name="guarantee-method"
-                        checked={guaranteeMethod === method.id}
-                        onChange={() => setGuaranteeMethod(method.id)}
-                      />
-                      <WalletCards />
-                      <span>
-                        <strong>{method.label}</strong>
-                        <small>Puede ser distinto al pago de tarifa</small>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </>
-            )}
-          <div className="info-banner">
-            <ShieldCheck />
-            <p>
-              Esta simulación no solicita números de tarjeta, claves ni códigos.
-            </p>
-          </div>
-        </section>
-        <aside className="panel checkout-summary">
-          <h2>Desglose económico</h2>
-          <div className="economic-summary">
-            <div>
-              <span>Tarifa · {breakdown.days} días</span>
-              <strong>{money(breakdown.fee)}</strong>
-            </div>
-            <div>
-              <span>Comisión</span>
-              <strong>{money(breakdown.serviceFee)}</strong>
-            </div>
-            <div>
-              <span>Garantía</span>
-              <strong>{money(breakdown.guarantee)}</strong>
-            </div>
-            <div className="total">
-              <span>Total</span>
-              <strong>{money(breakdown.total)}</strong>
-            </div>
-          </div>
+        </p>
+      ) : locked ? (
+        <p className="inline-status">
+          <ShieldCheck aria-hidden="true" />
+          {t('checkout.rentalLocked')}
+        </p>
+      ) : (
+        <>
+          <MethodPicker
+            purpose={purpose}
+            value={methodId}
+            onChange={setMethodId}
+            name={`method-${purpose}`}
+          />
+          <OutcomePicker value={outcome} onChange={setOutcome} />
+          <Feedback result={result} />
           <Button
             size="lg"
-            disabled={processing || isLoading || methods.length === 0}
-            onClick={() => {
-              setProcessing(true);
-              setTimeout(() => {
-                const rentalMethod =
-                  methods.find((method) => method.id === paymentMethod)
-                    ?.label ?? paymentMethod;
-                const holdMethod =
-                  methods.find((method) => method.id === guaranteeMethod)
-                    ?.label ?? guaranteeMethod;
-                payReservation(reservation.id, rentalMethod);
-                if (reservation.snapshot.guaranteeAmount > 0)
-                  holdGuarantee(reservation.id, holdMethod);
-                navigate(`/reservations/${reservation.id}`);
-              }, 500);
+            disabled={busy || !methodId}
+            onClick={async () => {
+              setBusy(true);
+              setResult(await onPay(methodId, outcome));
+              setBusy(false);
             }}
           >
-            {processing ? 'Procesando…' : 'Confirmar pago y garantía'}
+            {busy
+              ? t('checkout.processing')
+              : t('checkout.payWithProvider', { amount: formatMoney(amount) })}
           </Button>
-        </aside>
-      </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+export function CheckoutPage() {
+  const { t } = useI18n();
+  const { id } = useParams();
+  const { state, payRental, holdGuarantee } = useDemo();
+  const reservation = state.reservations.find((item) => item.id === id);
+  if (!reservation)
+    return (
+      <NotFound
+        title={t('reservations.notFound')}
+        description={t('errors.notFound.description')}
+      />
+    );
+  const listing = listingById(state, reservation.listingId);
+  const breakdown = economicBreakdown(reservation.snapshot);
+  const requiresGuarantee = breakdown.guarantee > 0;
+  const rentalDone = !canRetryPayment(reservation.paymentStatus);
+  const guaranteeDone =
+    !requiresGuarantee || reservation.guaranteeStatus === 'HELD';
+  const closed = reservation.status !== 'CONFIRMED';
+
+  return (
+    <>
+      <Link className="back-link" to={`/reservations/${reservation.id}`}>
+        <ArrowLeft aria-hidden="true" />
+        {t('checkout.back')}
+      </Link>
+      <PageHeader
+        eyebrow={t('checkout.eyebrow')}
+        title={t('checkout.title', { title: listing?.title ?? '' })}
+        description={t('checkout.description')}
+      />
+      {rentalDone && guaranteeDone && (
+        <div className="app-banner success">
+          <CheckCircle2 aria-hidden="true" />
+          <p>{t('checkout.allDone')}</p>
+          <Button
+            size="sm"
+            render={<Link to={`/reservations/${reservation.id}`} />}
+          >
+            {t('checkout.backToReservation')}
+          </Button>
+        </div>
+      )}
+      {closed ? (
+        <EmptyState
+          title={t('checkout.closedTitle')}
+          description={t('checkout.closedDescription')}
+          action={t('checkout.backToReservation')}
+          href={`/reservations/${reservation.id}`}
+        />
+      ) : (
+        <div className="checkout-layout">
+          <div className="stack">
+            {requiresGuarantee && (
+              <PaymentStep
+                purpose="GUARANTEE"
+                step={1}
+                title={t('checkout.guaranteeStep')}
+                amount={breakdown.guarantee}
+                status={reservation.guaranteeStatus}
+                done={guaranteeDone}
+                onPay={(method, outcome) =>
+                  holdGuarantee(reservation.id, method, outcome)
+                }
+              />
+            )}
+            <PaymentStep
+              purpose="RENTAL"
+              step={requiresGuarantee ? 2 : 1}
+              title={t('checkout.rentalStep')}
+              amount={breakdown.rentalCharge}
+              status={reservation.paymentStatus}
+              done={rentalDone}
+              locked={!guaranteeDone}
+              onPay={(method, outcome) =>
+                payRental(reservation.id, method, outcome)
+              }
+            />
+            <div className="app-banner info">
+              <ShieldCheck aria-hidden="true" />
+              <p>{t('checkout.security')}</p>
+            </div>
+          </div>
+          <aside className="panel checkout-summary">
+            <h2>{t('finance.breakdown')}</h2>
+            <EconomicSummary breakdown={breakdown} />
+            <p className="muted small">{t('checkout.guaranteeNote')}</p>
+          </aside>
+        </div>
+      )}
     </>
   );
 }
 
+export function DeliveryPage() {
+  const { t } = useI18n();
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const { state, recordDelivery } = useDemo();
+  const [evidence, setEvidence] = useState<Evidence[]>([]);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const reservation = state.reservations.find(
+    (item) => item.id === params.get('reservation'),
+  );
+  const user = currentUserOf(state);
+  if (!reservation || !user)
+    return (
+      <NotFound
+        title={t('reservations.notFound')}
+        description={t('errors.notFound.description')}
+      />
+    );
+  const listing = listingById(state, reservation.listingId);
+  const guaranteeOk =
+    reservation.snapshot.guaranteeAmount === 0 ||
+    reservation.guaranteeStatus === 'HELD';
+  const paymentOk = reservation.paymentStatus === 'PENDING_RELEASE';
+  const checks: [string, boolean][] = [
+    [
+      t('delivery.checks.reservation'),
+      reservation.status === 'CONFIRMED' && !reservation.deliveryRecorded,
+    ],
+    [t('delivery.checks.payment'), paymentOk],
+    [t('delivery.checks.guarantee'), guaranteeOk],
+  ];
+  const ready = checks.every(([, ok]) => ok);
+
+  return (
+    <>
+      <Link className="back-link" to={`/reservations/${reservation.id}`}>
+        <ArrowLeft aria-hidden="true" />
+        {t('checkout.backToReservation')}
+      </Link>
+      <PageHeader
+        eyebrow={t('delivery.eyebrow')}
+        title={t('delivery.title', { title: listing?.title ?? '' })}
+        description={t('delivery.description')}
+      />
+      <div className="two-panel-grid">
+        <section className="panel">
+          <h2>{t('delivery.checksTitle')}</h2>
+          <ul className="checklist">
+            {checks.map(([label, ok]) => (
+              <li key={label} className={ok ? 'ok' : 'missing'}>
+                {ok ? (
+                  <CheckCircle2 aria-hidden="true" />
+                ) : (
+                  <AlertTriangle aria-hidden="true" />
+                )}
+                {label}
+              </li>
+            ))}
+          </ul>
+          {!ready && <p className="field-error">{t('delivery.notReady')}</p>}
+        </section>
+        <section className="panel">
+          <h2>{t('delivery.evidenceTitle')}</h2>
+          <p className="muted small">{t('delivery.evidenceHint')}</p>
+          <EvidenceUploader
+            phase="INITIAL"
+            author={user}
+            value={evidence}
+            onChange={setEvidence}
+            label={t('delivery.evidenceLabel')}
+          />
+        </section>
+      </div>
+      <Feedback result={result} />
+      <div className="form-footer">
+        <Button
+          size="lg"
+          disabled={!ready}
+          onClick={() => setConfirmOpen(true)}
+        >
+          {t('delivery.confirm')}
+        </Button>
+      </div>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={t('delivery.confirmTitle')}
+        description={
+          evidence.length
+            ? t('delivery.confirmDescription', { count: evidence.length })
+            : t('delivery.confirmNoEvidence')
+        }
+        confirmLabel={t('delivery.confirm')}
+        onConfirm={() => {
+          const outcome = recordDelivery(reservation.id, evidence);
+          setResult(outcome);
+          setConfirmOpen(false);
+          if (outcome.ok && outcome.id) navigate(`/loans/${outcome.id}`);
+        }}
+      />
+    </>
+  );
+}
+
+type LoanTab = 'upcoming' | 'active' | 'overdue' | 'history';
+const loanTabStatuses: Record<LoanTab, Loan['status'][]> = {
+  upcoming: ['PENDING_RECEIPT'],
+  active: ['ACTIVE', 'RETURN_RECORDED', 'RETURN_CONFIRMED_PENDING_INCIDENT'],
+  overdue: ['OVERDUE'],
+  history: ['COMPLETED'],
+};
+
 export function LoansPage() {
+  const { t, formatDateTime } = useI18n();
   const { state } = useDemo();
-  const [tab, setTab] = useState<
-    'UPCOMING' | 'ACTIVE' | 'OVERDUE' | 'COMPLETED'
-  >('ACTIVE');
   const mine = state.loans.filter(
-    (item) =>
-      item.borrowerId === state.currentUserId ||
-      item.lenderId === state.currentUserId,
+    (loan) =>
+      loan.borrowerId === state.currentUserId ||
+      loan.lenderId === state.currentUserId,
   );
-  const filtered = mine.filter((item) =>
-    tab === 'UPCOMING'
-      ? ['PENDING_DELIVERY', 'PENDING_RECEIPT'].includes(item.status)
-      : item.status === tab ||
-        (tab === 'ACTIVE' &&
-          ['RETURN_RECORDED', 'RETURN_CONFIRMED_PENDING_INCIDENT'].includes(
-            item.status,
-          )),
+  const counts = Object.fromEntries(
+    (Object.keys(loanTabStatuses) as LoanTab[]).map((key) => [
+      key,
+      mine.filter((loan) => loanTabStatuses[key].includes(loan.status)).length,
+    ]),
+  ) as Record<LoanTab, number>;
+  const [tab, setTab] = useState<LoanTab>(
+    counts.upcoming ? 'upcoming' : 'active',
   );
+  const rows = mine
+    .filter((loan) => loanTabStatuses[tab].includes(loan.status))
+    .sort((a, b) =>
+      tab === 'history'
+        ? b.currentReturnAt.localeCompare(a.currentReturnAt)
+        : a.currentReturnAt.localeCompare(b.currentReturnAt),
+    );
   return (
     <>
       <PageHeader
-        eyebrow="Operaciones"
-        title="Préstamos"
-        description="Revisa estado, próxima acción, tarifa, garantía y contraparte."
+        eyebrow={t('loans.eyebrow')}
+        title={t('loans.title')}
+        description={t('loans.description')}
       />
-      <div className="tabs-bar" role="tablist">
-        {(
-          [
-            { key: 'UPCOMING', label: 'Próximos' },
-            { key: 'ACTIVE', label: 'Activos' },
-            { key: 'OVERDUE', label: 'Vencidos' },
-            { key: 'COMPLETED', label: 'Finalizados' },
-          ] as const
-        ).map((item) => (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === item.key}
-            key={item.key}
-            className={tab === item.key ? 'active' : ''}
-            onClick={() => setTab(item.key)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      {filtered.length ? (
-        <div className="reservation-grid">
-          {filtered.map((item) => {
-            const listing = state.listings.find(
-              (candidate) => candidate.id === item.listingId,
-            )!;
-            const isBorrower = item.borrowerId === state.currentUserId;
-            const counterpart = state.users.find(
-              (user) =>
-                user.id === (isBorrower ? item.lenderId : item.borrowerId),
+      <Tabs
+        label={t('loans.title')}
+        value={tab}
+        onChange={setTab}
+        options={(Object.keys(loanTabStatuses) as LoanTab[]).map((key) => ({
+          value: key,
+          label: t(`loans.tabs.${key}`),
+          count: counts[key],
+        }))}
+      />
+      {rows.length ? (
+        <ul className="card-grid">
+          {rows.map((loan) => {
+            const listing = listingById(state, loan.listingId);
+            const isBorrower = loan.borrowerId === state.currentUserId;
+            const counterpart = userById(
+              state,
+              counterpartOf(loan, state.currentUserId),
             );
-            const next =
-              item.status === 'PENDING_RECEIPT'
-                ? 'Confirmar recepción'
-                : item.status === 'ACTIVE'
-                  ? 'Registrar devolución'
-                  : item.status === 'RETURN_RECORDED'
-                    ? 'Confirmar devolución'
-                    : item.status === 'RETURN_CONFIRMED_PENDING_INCIDENT'
-                      ? 'Esperar resolución de incidencia'
-                      : item.status === 'OVERDUE'
-                        ? 'Coordinar devolución'
-                        : 'Calificar experiencia';
+            const next = loanNextAction(loan, state.currentUserId);
             return (
-              <article className="reservation-card" key={item.id}>
-                <img src={listing.image} alt={listing.title} />
+              <li className="reservation-card panel" key={loan.id}>
+                <img src={listing?.image} alt="" />
                 <div className="reservation-body">
                   <div className="operation-top">
-                    <StatusBadge status={item.status} />
-                    <span>
-                      {isBorrower ? 'Como prestatario' : 'Como prestamista'}
-                    </span>
+                    <StatusBadge kind="loan" status={loan.status} />
+                    <span className="role-tag">{t(roleLabel(isBorrower))}</span>
                   </div>
-                  <h2>{listing.title}</h2>
+                  <h2>{listing?.title}</h2>
                   <UserChip user={counterpart} />
-                  <p>
-                    <CalendarClock />
-                    {shortDate(item.snapshot.startAt)} —{' '}
-                    {shortDate(item.currentReturnAt)}
+                  <p className="muted">
+                    <CalendarClock aria-hidden="true" />
+                    {t('loans.returnAt', {
+                      date: formatDateTime(loan.currentReturnAt),
+                    })}
                   </p>
-                  <div className="mini-status">
-                    <span>
-                      <small>Próxima acción</small>
-                      <strong>{next}</strong>
-                    </span>
-                    <span>
-                      <small>Tarifa</small>
-                      <strong>
-                        {money(economicBreakdown(item.snapshot).fee)}
-                      </strong>
-                    </span>
-                    <span>
-                      <small>Garantía</small>
-                      <StatusBadge status={item.guaranteeStatus} />
-                    </span>
-                  </div>
-                  <Button render={<Link to={`/loans/${item.id}`} />}>
-                    Abrir operación
+                  {next !== 'NONE' && (
+                    <p
+                      className={`next-hint ${next.startsWith('WAIT') ? '' : 'actionable'}`}
+                    >
+                      {t(`loans.next.${next}`)}
+                    </p>
+                  )}
+                  <Button render={<Link to={`/loans/${loan.id}`} />}>
+                    {t('loans.open')}
                   </Button>
                 </div>
-              </article>
+              </li>
             );
           })}
-        </div>
+        </ul>
       ) : (
         <EmptyState
-          title={`No tienes préstamos ${tab === 'ACTIVE' ? 'activos' : tab === 'UPCOMING' ? 'próximos' : tab === 'OVERDUE' ? 'vencidos' : 'finalizados'}`}
-          description="Cuando exista una operación en este estado, aparecerá aquí."
+          icon={UsersRound}
+          title={t(`loans.empty.${tab}`)}
+          description={t('loans.emptyDescription')}
         />
       )}
     </>
@@ -761,717 +1267,845 @@ export function LoansPage() {
 type LoanDialog =
   | 'receipt'
   | 'extension'
+  | 'respondExtension'
+  | 'payExtension'
   | 'reschedule'
+  | 'respondReschedule'
   | 'return'
   | 'early'
-  | 'confirm'
-  | 'rating'
-  | null;
+  | 'confirmReturn'
+  | 'rating';
+
 export function LoanDetailPage() {
+  const { t, formatDateTime, formatMoney } = useI18n();
   const { id } = useParams();
-  const [params] = useSearchParams();
-  const {
-    state,
-    recordDelivery,
-    confirmReceipt,
-    requestExtension,
-    respondExtension,
-    payExtension,
-    proposeReschedule,
-    respondReschedule,
-    recordReturn,
-    confirmReturn,
-    rateLoan,
-    saveAnalysis,
-    mockRefreshDerivedStatuses,
-  } = useDemo();
-  const navigate = useNavigate();
-  const deliveryId = params.get('delivery');
-  const reservation = state.reservations.find((item) => item.id === deliveryId);
-  const item = state.loans.find((candidate) => candidate.id === id);
-  const [deliveryEvidence, setDeliveryEvidence] = useState<Evidence[]>([]);
-  const [dialog, setDialog] = useState<LoanDialog>(null);
-  const currentDue = item?.currentReturnAt ?? new Date().toISOString();
-  const suggestedDue = new Date(
-    Math.max(new Date(currentDue).getTime(), Date.now()) + 86_400_000,
-  );
-  const [newDate, setNewDate] = useState(
-    new Date(suggestedDue.getTime() - suggestedDue.getTimezoneOffset() * 60_000)
-      .toISOString()
-      .slice(0, 16),
-  );
-  const [notes, setNotes] = useState('');
-  const [returnEvidence, setReturnEvidence] = useState<Evidence[]>([]);
-  const [rating, setRating] = useState(5);
-  const [comment, setComment] = useState('');
-  const [message, setMessage] = useState('');
-  const [extensionPaymentMethod, setExtensionPaymentMethod] = useState('yape');
-  const {
-    data: extensionPaymentMethods = [],
-    isLoading: extensionMethodsLoading,
-    isError: extensionMethodsError,
-  } = useQuery({
-    queryKey: ['payment-methods', 'extension'],
-    queryFn: () => paymentService.getAvailablePaymentMethods(),
-  });
-  useEffect(() => {
-    mockRefreshDerivedStatuses();
-  }, [mockRefreshDerivedStatuses]);
-  if (id === 'new' && reservation) {
-    const listing = state.listings.find(
-      (candidate) => candidate.id === reservation.listingId,
-    )!;
-    const current = state.users.find(
-      (user) => user.id === state.currentUserId,
-    )!;
+  const demo = useDemo();
+  const { state } = demo;
+  const methodLabel = usePaymentMethodLabel();
+  const loan = state.loans.find((candidate) => candidate.id === id);
+  const { analysis, run } = useEvidenceAnalysis(loan);
+  const [dialog, setDialog] = useState<LoanDialog | null>(null);
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const user = currentUserOf(state);
+  if (!loan || !user)
     return (
-      <>
-        <PageHeader
-          eyebrow="Entrega"
-          title={`Registrar entrega · ${listing.title}`}
-          description="Documenta el estado y funcionamiento antes de entregar."
-        />
-        <div className="info-banner">
-          <FileCheck2 />
-          <p>
-            <strong>Controles previos:</strong> pago{' '}
-            {reservation.paymentStatus === 'PENDING_RELEASE'
-              ? 'confirmado'
-              : 'pendiente'}{' '}
-            y garantía {reservation.guaranteeStatus}.
-          </p>
-        </div>
-        <section className="panel">
-          <EvidenceUploader
-            phase="INITIAL"
-            author={current.name}
-            authorId={current.id}
-            value={deliveryEvidence}
-            onChange={setDeliveryEvidence}
-          />
-          <Button
-            size="lg"
-            disabled={!deliveryEvidence.length}
-            onClick={() => {
-              const result = recordDelivery(reservation.id, deliveryEvidence);
-              setMessage(result.message);
-              if (result.ok) setTimeout(() => navigate('/loans'), 500);
-            }}
-          >
-            Confirmar entrega
-          </Button>
-          {message && <output className="action-message">{message}</output>}
-        </section>
-      </>
-    );
-  }
-  if (!item)
-    return (
-      <EmptyState
-        title="Préstamo no encontrado"
-        description="Esta operación no existe."
+      <NotFound
+        title={t('loans.notFound')}
+        description={t('errors.notFound.description')}
       />
     );
-  const listing = state.listings.find(
-    (candidate) => candidate.id === item.listingId,
-  )!;
-  const isBorrower = item.borrowerId === state.currentUserId;
-  const counterpart = state.users.find(
-    (user) => user.id === (isBorrower ? item.lenderId : item.borrowerId),
+  const listing = listingById(state, loan.listingId);
+  const isBorrower = loan.borrowerId === user.id;
+  const counterpart = userById(state, counterpartOf(loan, user.id));
+  const breakdown = economicBreakdown(loan.snapshot);
+  const reservation = state.reservations.find(
+    (item) => item.id === loan.reservationId,
   );
-  const breakdown = economicBreakdown(item.snapshot);
-  const unresolvedIncident = state.incidents.some(
-    (incident) => incident.loanId === item.id && incident.status !== 'RESOLVED',
+  const incidents = incidentsOfLoan(state, loan.id);
+  const openIncident = loanHasOpenIncident(state, loan);
+  const pendingExtension = loan.extensions.find(
+    (ext) => ext.status === 'PENDING',
   );
-  const pendingExtension = item.extensions.findLast(
-    (extension) => extension.status === 'PENDING',
+  const payableExtension = loan.extensions.find(
+    (ext) => ext.status === 'PAYMENT_PENDING',
   );
-  const payableExtension = item.extensions.findLast(
-    (extension) => extension.status === 'PAYMENT_PENDING',
+  const pendingReschedule = loan.reschedules.find(
+    (item) => item.status === 'PENDING',
   );
-  const pendingReschedule = item.reschedules.findLast(
-    (reschedule) => reschedule.status === 'PENDING',
+  const next = loanNextAction(loan, user.id);
+  const canChangeDates =
+    loan.status === 'ACTIVE' && new Date(loan.currentReturnAt) > new Date();
+  const myRating = state.ratings.find(
+    (rating) => rating.loanId === loan.id && rating.authorId === user.id,
   );
-  const alreadyRated = item.ratedBy.includes(state.currentUserId);
-  const analysis = state.analyses.find(
-    (candidate) => candidate.loanId === item.id,
-  );
-  const runAnalysis = async () => {
-    saveAnalysis({
-      id: `analysis-${item.id}`,
-      loanId: item.id,
-      status: 'ANALYZING',
-      updatedAt: new Date().toISOString(),
-    });
-    const result = await evidenceAnalysisService.analyze(item.id);
-    saveAnalysis(result);
+  const close = (outcome?: ActionResult) => {
+    if (outcome) setResult(outcome);
+    if (!outcome || outcome.ok) setDialog(null);
   };
+
+  const actions: { key: string; node: React.ReactNode }[] = [];
+  const add = (key: string, node: React.ReactNode) =>
+    actions.push({ key, node });
+  if (isBorrower && loan.status === 'PENDING_RECEIPT')
+    add(
+      'receipt',
+      <Button onClick={() => setDialog('receipt')}>
+        {t('loanDetail.actions.confirmReceipt')}
+      </Button>,
+    );
+  if (isBorrower && ['ACTIVE', 'OVERDUE'].includes(loan.status)) {
+    add(
+      'return',
+      <Button onClick={() => setDialog('return')}>
+        {t('loanDetail.actions.recordReturn')}
+      </Button>,
+    );
+    if (loan.status === 'ACTIVE')
+      add(
+        'early',
+        <Button variant="outline" onClick={() => setDialog('early')}>
+          {t('loanDetail.actions.earlyReturn')}
+        </Button>,
+      );
+  }
+  if (isBorrower && canChangeDates && !pendingExtension && !payableExtension)
+    add(
+      'extension',
+      <Button variant="outline" onClick={() => setDialog('extension')}>
+        {t('loanDetail.actions.requestExtension')}
+      </Button>,
+    );
+  if (isBorrower && payableExtension)
+    add(
+      'payExtension',
+      <Button onClick={() => setDialog('payExtension')}>
+        {t('loanDetail.actions.payExtension', {
+          amount: formatMoney(payableExtension.additionalCost),
+        })}
+      </Button>,
+    );
+  if (isBorrower && pendingReschedule)
+    add(
+      'respondReschedule',
+      <Button onClick={() => setDialog('respondReschedule')}>
+        {t('loanDetail.actions.reviewReschedule')}
+      </Button>,
+    );
+  if (!isBorrower && pendingExtension)
+    add(
+      'respondExtension',
+      <Button onClick={() => setDialog('respondExtension')}>
+        {t('loanDetail.actions.reviewExtension')}
+      </Button>,
+    );
+  if (!isBorrower && canChangeDates && !pendingReschedule)
+    add(
+      'reschedule',
+      <Button variant="outline" onClick={() => setDialog('reschedule')}>
+        {t('loanDetail.actions.proposeReschedule')}
+      </Button>,
+    );
+  if (!isBorrower && loan.status === 'RETURN_RECORDED')
+    add(
+      'confirmReturn',
+      <Button onClick={() => setDialog('confirmReturn')}>
+        {t('loanDetail.actions.confirmReturn')}
+      </Button>,
+    );
+  if (loan.status === 'COMPLETED' && !loan.ratedBy.includes(user.id))
+    add(
+      'rating',
+      <Button onClick={() => setDialog('rating')}>
+        <Star aria-hidden="true" />
+        {t('loanDetail.actions.rate')}
+      </Button>,
+    );
+  if (loan.status !== 'COMPLETED')
+    add(
+      'incident',
+      <Button
+        variant="ghost"
+        className="danger-text"
+        render={<Link to={`/incidents?loan=${loan.id}`} />}
+      >
+        <ShieldAlert aria-hidden="true" />
+        {t('loanDetail.actions.reportIncident')}
+      </Button>,
+    );
+
   return (
     <>
+      <Link className="back-link" to="/loans">
+        <ArrowLeft aria-hidden="true" />
+        {t('loans.back')}
+      </Link>
       <PageHeader
-        eyebrow={`Préstamo ${item.id.toUpperCase()}`}
-        title={listing.title}
-        description={`${isBorrower ? 'Como prestatario' : 'Como prestamista'} · ${counterpart?.name}`}
-        action={<StatusBadge status={item.status} />}
+        eyebrow={`${t('loanDetail.eyebrow')} · ${t(roleLabel(isBorrower))}`}
+        title={listing?.title ?? ''}
+        description={t('loanDetail.with', { name: counterpart?.name ?? '' })}
+        action={<StatusBadge kind="loan" status={loan.status} />}
       />
-      <div className="info-banner immutable">
-        <FileCheck2 />
-        <p>
-          <strong>Condiciones congeladas.</strong> Estas condiciones
-          corresponden al momento en que la reserva fue confirmada.
-        </p>
+      <Feedback result={result} />
+      {loan.status === 'OVERDUE' && (
+        <div className="app-banner danger">
+          <AlertTriangle aria-hidden="true" />
+          <p>
+            {t(
+              isBorrower
+                ? 'loanDetail.overdueBorrower'
+                : 'loanDetail.overdueLender',
+              { date: formatDateTime(loan.currentReturnAt) },
+            )}
+          </p>
+        </div>
+      )}
+      {openIncident && (
+        <div className="app-banner warning">
+          <ShieldAlert aria-hidden="true" />
+          <p>{t('loanDetail.incidentHold')}</p>
+        </div>
+      )}
+      <div className="action-panel panel">
+        <div>
+          <p className="eyebrow">{t('operations.nextStep')}</p>
+          <p className="next-title">{t(`loans.next.${next}` as MessageKey)}</p>
+          {loan.status === 'ACTIVE' && (
+            <p className="muted small">{t('loanDetail.noCancel')}</p>
+          )}
+        </div>
+        <div className="button-row">
+          {actions.map(({ key, node }) => (
+            <span key={key}>{node}</span>
+          ))}
+        </div>
       </div>
       <div className="detail-grid">
         <section className="panel">
-          <span className="eyebrow">Periodo vigente</span>
-          <h2>{shortDate(item.snapshot.startAt)}</h2>
-          <p>hasta {shortDate(item.currentReturnAt)}</p>
-          {item.currentReturnAt !== item.originalReturnAt && (
-            <p className="muted">
-              Fecha original: {shortDate(item.originalReturnAt)}
-            </p>
-          )}
-          <p>
-            <MapPin />
-            {item.snapshot.exchangePlace}
+          <p className="eyebrow">{t('loanDetail.period')}</p>
+          <DefinitionList
+            items={[
+              [t('loanDetail.start'), formatDateTime(loan.snapshot.startAt)],
+              [
+                t('loanDetail.currentReturn'),
+                <strong key="due">
+                  {formatDateTime(loan.currentReturnAt)}
+                </strong>,
+              ],
+              ...(loan.currentReturnAt !== loan.originalReturnAt
+                ? ([
+                    [
+                      t('loanDetail.originalReturn'),
+                      formatDateTime(loan.originalReturnAt),
+                    ],
+                  ] as [string, string][])
+                : []),
+              [t('loanDetail.deliveredAt'), formatDateTime(loan.deliveredAt)],
+              [
+                t('loanDetail.receivedAt'),
+                loan.receiptConfirmedAt
+                  ? formatDateTime(loan.receiptConfirmedAt)
+                  : t('common.pending'),
+              ],
+              ...(loan.returnRecord
+                ? ([
+                    [
+                      t('loanDetail.returnedAt'),
+                      formatDateTime(loan.returnRecord.registeredAt),
+                    ],
+                    [
+                      t('loanDetail.returnConfirmedAt'),
+                      loan.returnRecord.confirmedAt
+                        ? formatDateTime(loan.returnRecord.confirmedAt)
+                        : t('common.pending'),
+                    ],
+                  ] as [string, string][])
+                : []),
+            ]}
+          />
+          <p className="muted small">
+            {t('fields.exchangePlace')}: {loan.snapshot.exchangePlace}
           </p>
         </section>
-        <section className="panel">
-          <span className="eyebrow">Contraparte</span>
-          <UserChip user={counterpart} detail />
-          {canViewCounterpartyPhone(item, state.currentUserId) && (
-            <div className="contact-card">
-              <strong>Coordinación de entrega</strong>
-              <span>Teléfono: {counterpart?.phone}</span>
-            </div>
-          )}
-        </section>
+        <PartyCard
+          title={t(isBorrower ? 'roles.LENDER' : 'roles.BORROWER')}
+          user={counterpart}
+          showPhone={canViewCounterpartyPhone(loan, user.id)}
+        />
         <FinancialCard
           type="payment"
-          amount={breakdown.fee + breakdown.serviceFee}
-          status={item.paymentStatus}
+          amount={breakdown.rentalCharge}
+          status={loan.paymentStatus}
+          method={
+            reservation?.paymentMethod
+              ? methodLabel(reservation.paymentMethod)
+              : undefined
+          }
           note={
-            item.paymentStatus === 'RELEASED'
-              ? 'Tarifa liberada al prestamista.'
-              : 'Pago confirmado — pendiente de liberación al prestamista.'
+            isBorrower
+              ? t(`finance.paymentNotes.${loan.paymentStatus}` as MessageKey)
+              : loan.paymentStatus === 'RELEASED'
+                ? t('finance.lenderReleased', {
+                    amount: formatMoney(breakdown.lenderPayout),
+                  })
+                : t('finance.lenderPending', {
+                    amount: formatMoney(breakdown.lenderPayout),
+                  })
           }
         />
         <FinancialCard
           type="guarantee"
-          amount={item.snapshot.guaranteeAmount}
-          status={item.guaranteeStatus}
-          note={
-            unresolvedIncident
-              ? 'Garantía retenida mientras se resuelve la incidencia.'
-              : 'Estado actual de la garantía.'
+          amount={breakdown.guarantee}
+          status={loan.guaranteeStatus}
+          method={
+            reservation?.guaranteePaymentMethod
+              ? methodLabel(reservation.guaranteePaymentMethod)
+              : undefined
           }
+          note={t(
+            `finance.guaranteeNotes.${loan.guaranteeStatus}` as MessageKey,
+          )}
         />
       </div>
-      <section className="panel">
-        <span className="eyebrow">Trazabilidad</span>
-        <Timeline items={item.timeline} />
-      </section>
-      <EvidenceComparison
-        evidence={item.evidence}
-        analysis={analysis}
-        onAnalyze={runAnalysis}
-      />
+      <div className="two-panel-grid">
+        <section className="panel">
+          <p className="eyebrow">{t('loanDetail.traceability')}</p>
+          <Timeline items={loan.timeline} />
+          {loan.returnRecord && (
+            <div className="return-note">
+              <strong>
+                {t(
+                  loan.returnRecord.early
+                    ? 'loanDetail.earlyReturnNotes'
+                    : 'loanDetail.returnNotes',
+                )}
+              </strong>
+              <p>{loan.returnRecord.notes}</p>
+            </div>
+          )}
+        </section>
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">{t('loanDetail.history')}</p>
+              <h2>{t('loanDetail.historyTitle')}</h2>
+            </div>
+            <RotateCcw aria-hidden="true" />
+          </div>
+          {loan.extensions.length || loan.reschedules.length ? (
+            <ul className="history-list">
+              {loan.extensions.map((ext) => (
+                <li key={ext.id}>
+                  <div className="history-head">
+                    <strong>
+                      {t('loanDetail.extensionBy', {
+                        name: userById(state, ext.requesterId)?.name ?? '',
+                      })}
+                    </strong>
+                    <StatusBadge kind="extension" status={ext.status} />
+                  </div>
+                  <DefinitionList
+                    items={[
+                      [
+                        t('loanDetail.requestedAt'),
+                        formatDateTime(ext.requestedAt),
+                      ],
+                      [
+                        t('loanDetail.previousDate'),
+                        formatDateTime(ext.originalReturnAt),
+                      ],
+                      [
+                        t('loanDetail.proposedDate'),
+                        formatDateTime(ext.proposedReturnAt),
+                      ],
+                      [
+                        t('loanDetail.additionalCost'),
+                        formatMoney(ext.additionalCost),
+                      ],
+                      ...(ext.respondedAt
+                        ? ([
+                            [
+                              t('loanDetail.respondedAt'),
+                              formatDateTime(ext.respondedAt),
+                            ],
+                          ] as [string, string][])
+                        : []),
+                      ...(ext.paymentStatus
+                        ? ([
+                            [
+                              t('finance.payment'),
+                              <StatusBadge
+                                key="p"
+                                kind="payment"
+                                status={ext.paymentStatus}
+                              />,
+                            ],
+                          ] as [string, React.ReactNode][])
+                        : []),
+                      ...(ext.resultingReturnAt
+                        ? ([
+                            [
+                              t('loanDetail.resultingDate'),
+                              formatDateTime(ext.resultingReturnAt),
+                            ],
+                          ] as [string, string][])
+                        : []),
+                    ]}
+                  />
+                </li>
+              ))}
+              {loan.reschedules.map((item) => (
+                <li key={item.id}>
+                  <div className="history-head">
+                    <strong>
+                      {t('loanDetail.rescheduleBy', {
+                        name: userById(state, item.proposerId)?.name ?? '',
+                      })}
+                    </strong>
+                    <StatusBadge kind="reschedule" status={item.status} />
+                  </div>
+                  <DefinitionList
+                    items={[
+                      [
+                        t('loanDetail.requestedAt'),
+                        formatDateTime(item.proposedAt),
+                      ],
+                      [
+                        t('loanDetail.previousDate'),
+                        formatDateTime(item.originalReturnAt),
+                      ],
+                      [
+                        t('loanDetail.proposedDate'),
+                        formatDateTime(item.proposedReturnAt),
+                      ],
+                      [t('loanDetail.additionalCost'), formatMoney(0)],
+                      ...(item.resultingReturnAt
+                        ? ([
+                            [
+                              t('loanDetail.resultingDate'),
+                              formatDateTime(item.resultingReturnAt),
+                            ],
+                          ] as [string, string][])
+                        : []),
+                    ]}
+                  />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">{t('loanDetail.noExtensions')}</p>
+          )}
+        </section>
+      </div>
       <section className="panel">
         <div className="section-heading">
           <div>
-            <span className="eyebrow">Historial</span>
-            <h2>Extensiones y reprogramaciones</h2>
+            <p className="eyebrow">{t('evidence.title')}</p>
+            <h2>{t('evidence.comparison')}</h2>
           </div>
-          <RotateCcw />
         </div>
-        {!item.extensions.length && !item.reschedules.length ? (
-          <p className="muted">No hay cambios de fecha registrados.</p>
+        <div className="evidence-comparison">
+          <EvidenceGallery
+            title={t('evidence.initial')}
+            items={loan.evidence.filter((item) => item.phase === 'INITIAL')}
+          />
+          <EvidenceGallery
+            title={t('evidence.final')}
+            items={loan.evidence.filter((item) => item.phase === 'FINAL')}
+          />
+        </div>
+        <AnalysisPanel
+          analysis={analysis}
+          evidence={loan.evidence}
+          onAnalyze={run}
+        />
+      </section>
+      <section className="panel">
+        <p className="eyebrow">{t('loanDetail.incidents')}</p>
+        {incidents.length ? (
+          <ul className="incident-mini-list">
+            {incidents.map((incident) => (
+              <li key={incident.id}>
+                <Link to={`/incidents/${incident.id}`}>
+                  <strong>{incident.id}</strong> ·{' '}
+                  {t(`incidentTypes.${incident.type}`)}
+                </Link>
+                <StatusBadge kind="incident" status={incident.status} />
+              </li>
+            ))}
+          </ul>
         ) : (
-          <div className="history-list">
-            {item.extensions.map((extension) => (
-              <article key={extension.id}>
-                <strong>Extensión solicitada por el prestatario</strong>
-                <span>
-                  {shortDate(extension.originalReturnAt)} →{' '}
-                  {shortDate(extension.proposedReturnAt)}
-                </span>
-                <span>Costo adicional: {money(extension.additionalCost)}</span>
-                <span>Solicitada: {shortDate(extension.requestedAt)}</span>
-                {extension.respondedAt && (
-                  <span>Respondida: {shortDate(extension.respondedAt)}</span>
-                )}
-                {extension.paymentStatus && (
-                  <span>
-                    Pago:{' '}
-                    {statusLabels[extension.paymentStatus] ??
-                      extension.paymentStatus}
-                  </span>
-                )}
-                {extension.resultingReturnAt && (
-                  <span>
-                    Fecha resultante: {shortDate(extension.resultingReturnAt)}
-                  </span>
-                )}
-                <StatusBadge status={extension.status} />
-              </article>
-            ))}
-            {item.reschedules.map((reschedule) => (
-              <article key={reschedule.id}>
-                <strong>Reprogramación propuesta por el prestamista</strong>
-                <span>
-                  {shortDate(reschedule.originalReturnAt)} →{' '}
-                  {shortDate(reschedule.proposedReturnAt)}
-                </span>
-                <span>Costo adicional: {money(0)}</span>
-                <span>Propuesta: {shortDate(reschedule.proposedAt)}</span>
-                {reschedule.respondedAt && (
-                  <span>Respondida: {shortDate(reschedule.respondedAt)}</span>
-                )}
-                <StatusBadge status={reschedule.status} />
-              </article>
-            ))}
-          </div>
+          <p className="muted">{t('loanDetail.noIncidents')}</p>
         )}
       </section>
-      <div className="sticky-actions">
-        {isBorrower && item.status === 'PENDING_RECEIPT' && (
-          <Button onClick={() => setDialog('receipt')}>
-            Confirmar recepción
-          </Button>
-        )}
-        {isBorrower && ['ACTIVE', 'OVERDUE'].includes(item.status) && (
-          <>
-            {item.status === 'ACTIVE' && (
-              <Button variant="outline" onClick={() => setDialog('extension')}>
-                Solicitar extensión
-              </Button>
-            )}
-            <Button onClick={() => setDialog('return')}>
-              Registrar devolución
-            </Button>
-            <Button variant="outline" onClick={() => setDialog('early')}>
-              Devolver antes de tiempo
-            </Button>
-          </>
-        )}
-        {isBorrower && payableExtension && (
-          <div className="inline-payment-action">
-            {extensionMethodsLoading ? (
-              <LoadingSkeleton cards={1} />
-            ) : extensionMethodsError ||
-              extensionPaymentMethods.length === 0 ? (
-              <span className="field-error">
-                El proveedor de pagos no está disponible.
-              </span>
-            ) : (
-              <label>
-                Medio para extensión
-                <select
-                  value={extensionPaymentMethod}
-                  onChange={(event) =>
-                    setExtensionPaymentMethod(event.target.value)
-                  }
-                >
-                  {extensionPaymentMethods.map((method) => (
-                    <option value={method.id} key={method.id}>
-                      {method.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <Button
-              disabled={
-                extensionMethodsLoading ||
-                extensionMethodsError ||
-                extensionPaymentMethods.length === 0
-              }
-              onClick={() => {
-                const selected = extensionPaymentMethods.find(
-                  (method) => method.id === extensionPaymentMethod,
-                );
-                const result = payExtension(
-                  item.id,
-                  selected?.label ?? extensionPaymentMethod,
-                );
-                setMessage(result.message);
-              }}
-            >
-              Pagar extensión · {money(payableExtension.additionalCost)}
-            </Button>
-          </div>
-        )}
-        {!isBorrower && item.status === 'ACTIVE' && (
-          <Button variant="outline" onClick={() => setDialog('reschedule')}>
-            Proponer nueva fecha
-          </Button>
-        )}
-        {!isBorrower && pendingExtension && (
-          <>
-            <Button onClick={() => respondExtension(item.id, true)}>
-              Aceptar extensión
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => respondExtension(item.id, false)}
-            >
-              Rechazar extensión
-            </Button>
-          </>
-        )}
-        {isBorrower && pendingReschedule && (
-          <>
-            <Button onClick={() => respondReschedule(item.id, true)}>
-              Aceptar reprogramación
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => respondReschedule(item.id, false)}
-            >
-              Rechazar reprogramación
-            </Button>
-          </>
-        )}
-        {!isBorrower && item.status === 'RETURN_RECORDED' && (
-          <>
-            <Button onClick={() => setDialog('confirm')}>
-              Confirmar devolución
-            </Button>
-            <Button
-              variant="destructive"
-              render={<Link to={`/incidents?loan=${item.id}`} />}
-            >
-              <ShieldAlert />
-              Reportar incidencia
-            </Button>
-          </>
-        )}
-        {item.status === 'COMPLETED' && !alreadyRated && (
-          <Button onClick={() => setDialog('rating')}>
-            Calificar experiencia
-          </Button>
-        )}
-        {item.status === 'COMPLETED' && alreadyRated && (
-          <span className="success-text">Ya calificaste esta operación.</span>
-        )}
-        {item.status === 'ACTIVE' && (
-          <span className="muted">Un préstamo activo no puede cancelarse.</span>
-        )}
-      </div>
-      {message && <output className="action-message">{message}</output>}
-      <LoanActionDialog
+      {loan.status === 'COMPLETED' && (
+        <section className="panel">
+          <p className="eyebrow">{t('loanDetail.rating')}</p>
+          {myRating ? (
+            <p>
+              {t('loanDetail.yourRating', { stars: myRating.stars })}
+              {myRating.comment && <> · “{myRating.comment}”</>}
+            </p>
+          ) : (
+            <p className="muted">{t('loanDetail.ratingPending')}</p>
+          )}
+        </section>
+      )}
+      <LoanDialogs
         dialog={dialog}
-        onClose={() => setDialog(null)}
-        item={item}
-        currentUser={state.users.find(
-          (user) => user.id === state.currentUserId,
-        )!}
-        newDate={newDate}
-        setNewDate={setNewDate}
-        notes={notes}
-        setNotes={setNotes}
-        evidence={returnEvidence}
-        setEvidence={setReturnEvidence}
-        rating={rating}
-        setRating={setRating}
-        comment={comment}
-        setComment={setComment}
-        onSubmit={() => {
-          if (dialog === 'receipt') confirmReceipt(item.id);
-          if (dialog === 'extension') {
-            const result = requestExtension(
-              item.id,
-              new Date(newDate).toISOString(),
-            );
-            setMessage(result.message);
-          }
-          if (dialog === 'reschedule') {
-            const result = proposeReschedule(
-              item.id,
-              new Date(newDate).toISOString(),
-            );
-            setMessage(result.message);
-          }
-          if (dialog === 'return' || dialog === 'early')
-            recordReturn(item.id, dialog === 'early', notes, returnEvidence);
-          if (dialog === 'confirm') confirmReturn(item.id);
-          if (dialog === 'rating') {
-            const result = rateLoan(item.id, rating, comment);
-            setMessage(result.message);
-          }
-          setDialog(null);
-        }}
+        setDialog={setDialog}
+        loan={loan}
+        user={user}
+        onDone={close}
       />
     </>
   );
 }
 
-function EvidenceComparison({
-  evidence,
-  analysis,
-  onAnalyze,
-}: {
-  evidence: Evidence[];
-  analysis?: ReturnType<typeof useDemo>['state']['analyses'][number];
-  onAnalyze: () => void;
-}) {
-  const before = evidence.filter((item) => item.phase === 'INITIAL');
-  const after = evidence.filter((item) => item.phase === 'FINAL');
-  return (
-    <section className="panel">
-      <div className="section-heading">
-        <div>
-          <span className="eyebrow">Evidencias</span>
-          <h2>Comparación antes y después</h2>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onAnalyze}
-          disabled={analysis?.status === 'ANALYZING'}
-        >
-          {analysis?.status === 'ANALYZING'
-            ? 'Analizando…'
-            : 'Simular análisis'}
-        </Button>
-      </div>
-      <div className="ai-banner">
-        <ShieldCheck />
-        <div>
-          <strong>Análisis automático · {analysis?.status ?? 'IDLE'}</strong>
-          <p>
-            {analysis?.summary ??
-              'Inicia el análisis simulado cuando existan evidencias.'}
-          </p>
-          <small>
-            El análisis automático es únicamente información de apoyo y no
-            determina responsabilidades.
-          </small>
-        </div>
-      </div>
-      <div className="evidence-comparison">
-        <EvidenceColumn title="Antes de la entrega" items={before} />
-        <EvidenceColumn title="Después de la devolución" items={after} />
-      </div>
-    </section>
-  );
-}
-function EvidenceColumn({
-  title,
-  items,
-}: {
-  title: string;
-  items: Evidence[];
-}) {
-  return (
-    <section>
-      <span className="eyebrow">{title}</span>
-      {items.length ? (
-        items.map((item) => (
-          <div className="evidence-tile" key={item.id}>
-            {item.url && item.type === 'PHOTO' ? (
-              <img src={item.url} alt={item.label} />
-            ) : (
-              <Camera />
-            )}
-            <strong>{item.label}</strong>
-            <span>
-              {item.author} · {shortDate(item.createdAt)}
-            </span>
-          </div>
-        ))
-      ) : (
-        <p className="muted">Sin evidencias.</p>
-      )}
-    </section>
-  );
-}
-
-function LoanActionDialog({
+function LoanDialogs({
   dialog,
-  onClose,
-  item,
-  currentUser,
-  newDate,
-  setNewDate,
-  notes,
-  setNotes,
-  evidence,
-  setEvidence,
-  rating,
-  setRating,
-  comment,
-  setComment,
-  onSubmit,
+  setDialog,
+  loan,
+  user,
+  onDone,
 }: {
-  dialog: LoanDialog;
-  onClose: () => void;
-  item: ReturnType<typeof useDemo>['state']['loans'][number];
-  currentUser: ReturnType<typeof useDemo>['state']['users'][number];
-  newDate: string;
-  setNewDate: (value: string) => void;
-  notes: string;
-  setNotes: (value: string) => void;
-  evidence: Evidence[];
-  setEvidence: (value: Evidence[]) => void;
-  rating: number;
-  setRating: (value: number) => void;
-  comment: string;
-  setComment: (value: string) => void;
-  onSubmit: () => void;
+  dialog: LoanDialog | null;
+  setDialog: (dialog: LoanDialog | null) => void;
+  loan: Loan;
+  user: User;
+  onDone: (result?: ActionResult) => void;
 }) {
-  const title =
-    dialog === 'receipt'
-      ? 'Confirmar recepción'
-      : dialog === 'extension'
-        ? 'Solicitar extensión'
-        : dialog === 'reschedule'
-          ? 'Proponer nueva fecha'
-          : dialog === 'early'
-            ? 'Devolver antes de tiempo'
-            : dialog === 'confirm'
-              ? 'Confirmar devolución'
-              : dialog === 'rating'
-                ? 'Calificar experiencia'
-                : 'Registrar devolución';
-  const needsEvidence = dialog === 'return' || dialog === 'early';
-  const validDate = new Date(newDate) > new Date(item.currentReturnAt);
-  return (
-    <Dialog open={Boolean(dialog)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flow-dialog">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>
-            {dialog === 'receipt'
-              ? 'Después de confirmar, el préstamo quedará activo y la tarifa se liberará.'
-              : dialog === 'early'
-                ? 'La devolución anticipada usa el mismo proceso de evidencias y confirmación.'
-                : 'Revisa la información antes de confirmar.'}
-          </DialogDescription>
-        </DialogHeader>
-        {dialog === 'receipt' && (
-          <div className="warning-box">
-            <AlertTriangle />
-            <p>
-              Después de confirmar la recepción, esta operación ya no podrá
-              cancelarse.
-            </p>
-          </div>
-        )}
-        {(dialog === 'extension' || dialog === 'reschedule') && (
-          <>
-            <label className="field">
-              <span>Nueva fecha y hora</span>
-              <input
-                type="datetime-local"
-                value={newDate}
-                onChange={(event) => setNewDate(event.target.value)}
-              />
-            </label>
-            <div className="economic-summary">
-              <div>
-                <span>Costo adicional</span>
-                <strong>
-                  {dialog === 'reschedule'
-                    ? money(0)
-                    : money(
-                        extensionCost(
-                          item.currentReturnAt,
-                          newDate,
-                          item.snapshot.dailyRate,
-                        ),
-                      )}
-                </strong>
-              </div>
+  const { t, formatDateTime, formatMoney } = useI18n();
+  const demo = useDemo();
+  const suggested = useMemo(() => {
+    const base = new Date(
+      Math.max(new Date(loan.currentReturnAt).getTime(), Date.now()) +
+        86_400_000,
+    );
+    return toZonedInput(base);
+  }, [loan.currentReturnAt]);
+  const [date, setDate] = useState(suggested);
+  const [notes, setNotes] = useState('');
+  const [evidence, setEvidence] = useState<Evidence[]>([]);
+  const [stars, setStars] = useState(0);
+  const [comment, setComment] = useState('');
+  const [methodId, setMethodId] = useState('');
+  const [outcome, setOutcome] = useState<ProviderOutcome>('APPROVED');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ActionResult | null>(null);
+  const pendingExtension = loan.extensions.find(
+    (ext) => ext.status === 'PENDING',
+  );
+  const payableExtension = loan.extensions.find(
+    (ext) => ext.status === 'PAYMENT_PENDING',
+  );
+  const pendingReschedule = loan.reschedules.find(
+    (item) => item.status === 'PENDING',
+  );
+  const dateIso = fromZonedInput(date);
+  const openChange = (open: boolean) => {
+    if (!open) {
+      setDialog(null);
+      setError(null);
+    }
+  };
+  const finish = (result: ActionResult) => {
+    if (result.ok) {
+      setError(null);
+      setNotes('');
+      setEvidence([]);
+      onDone(result);
+    } else setError(result);
+  };
+  const common = { open: true, onOpenChange: openChange };
+
+  switch (dialog) {
+    case 'receipt':
+      return (
+        <ConfirmDialog
+          {...common}
+          title={t('loanDialogs.receipt.title')}
+          description={t('loanDialogs.receipt.description')}
+          confirmLabel={t('loanDialogs.receipt.confirm')}
+          onConfirm={() => finish(demo.confirmReceipt(loan.id))}
+        >
+          <EvidenceGallery
+            title={t('evidence.initial')}
+            items={loan.evidence.filter((item) => item.phase === 'INITIAL')}
+          />
+          <p className="inline-status warning">
+            <AlertTriangle aria-hidden="true" />
+            {t('loanDialogs.receipt.warning')}
+          </p>
+          <Feedback result={error} />
+        </ConfirmDialog>
+      );
+    case 'extension':
+    case 'reschedule': {
+      const extension = dialog === 'extension';
+      const cost = extension
+        ? extensionCost(loan.currentReturnAt, dateIso, loan.snapshot.dailyRate)
+        : 0;
+      const validDate =
+        Boolean(dateIso) &&
+        (extension
+          ? new Date(dateIso) > new Date(loan.currentReturnAt)
+          : new Date(dateIso) > new Date());
+      return (
+        <ConfirmDialog
+          {...common}
+          title={t(
+            extension
+              ? 'loanDialogs.extension.title'
+              : 'loanDialogs.reschedule.title',
+          )}
+          description={t(
+            extension
+              ? 'loanDialogs.extension.description'
+              : 'loanDialogs.reschedule.description',
+            { date: formatDateTime(loan.currentReturnAt) },
+          )}
+          confirmLabel={t(
+            extension
+              ? 'loanDialogs.extension.confirm'
+              : 'loanDialogs.reschedule.confirm',
+          )}
+          disabled={!validDate}
+          onConfirm={() =>
+            finish(
+              extension
+                ? demo.requestExtension(loan.id, dateIso)
+                : demo.proposeReschedule(loan.id, dateIso),
+            )
+          }
+        >
+          <Field
+            label={t('loanDialogs.newDate')}
+            error={
+              !validDate
+                ? t(
+                    extension
+                      ? 'results.extension.mustBeLater'
+                      : 'results.reschedule.mustBeFuture',
+                  )
+                : undefined
+            }
+          >
+            <input
+              type="datetime-local"
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+            />
+          </Field>
+          <dl className="economic-summary">
+            <div className="total">
+              <dt>{t('loanDetail.additionalCost')}</dt>
+              <dd>{formatMoney(cost)}</dd>
             </div>
-            {!validDate && (
-              <p className="field-error">
-                La fecha propuesta debe ser posterior a la fecha vigente.
+          </dl>
+          <p className="muted small">
+            {t(
+              extension
+                ? 'loanDialogs.extension.note'
+                : 'loanDialogs.reschedule.note',
+            )}
+          </p>
+          <Feedback result={error} />
+        </ConfirmDialog>
+      );
+    }
+    case 'respondExtension':
+    case 'respondReschedule': {
+      const isExtension = dialog === 'respondExtension';
+      const item = isExtension ? pendingExtension : pendingReschedule;
+      if (!item) return null;
+      const respond = (accepted: boolean) =>
+        finish(
+          isExtension
+            ? demo.respondExtension(loan.id, accepted)
+            : demo.respondReschedule(loan.id, accepted),
+        );
+      return (
+        <ConfirmDialog
+          {...common}
+          title={t(
+            isExtension
+              ? 'loanDialogs.respondExtension.title'
+              : 'loanDialogs.respondReschedule.title',
+          )}
+          description={t(
+            isExtension
+              ? 'loanDialogs.respondExtension.description'
+              : 'loanDialogs.respondReschedule.description',
+          )}
+          confirmLabel={t('loanDialogs.accept')}
+          onConfirm={() => respond(true)}
+        >
+          <DefinitionList
+            items={[
+              [
+                t('loanDetail.currentReturn'),
+                formatDateTime(item.originalReturnAt),
+              ],
+              [
+                t('loanDetail.proposedDate'),
+                formatDateTime(item.proposedReturnAt),
+              ],
+              [
+                t('loanDetail.additionalCost'),
+                formatMoney(
+                  isExtension && pendingExtension
+                    ? pendingExtension.additionalCost
+                    : 0,
+                ),
+              ],
+            ]}
+          />
+          {isExtension &&
+            pendingExtension &&
+            pendingExtension.additionalCost > 0 && (
+              <p className="muted small">
+                {t('loanDialogs.respondExtension.paymentNote')}
               </p>
             )}
-          </>
-        )}
-        {dialog === 'early' && (
-          <div className="warning-box strong">
-            <AlertTriangle />
-            <p>
-              <strong>
-                Devolver el objeto antes de la fecha acordada no genera
-                automáticamente un reembolso proporcional de la tarifa pagada.
-              </strong>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={() => respond(false)}
+          >
+            {t('loanDialogs.reject')}
+          </Button>
+          <Feedback result={error} />
+        </ConfirmDialog>
+      );
+    }
+    case 'payExtension':
+      if (!payableExtension) return null;
+      return (
+        <ConfirmDialog
+          {...common}
+          title={t('loanDialogs.payExtension.title')}
+          description={t('loanDialogs.payExtension.description', {
+            date: formatDateTime(payableExtension.proposedReturnAt),
+          })}
+          confirmLabel={t('checkout.payWithProvider', {
+            amount: formatMoney(payableExtension.additionalCost),
+          })}
+          disabled={!methodId}
+          busy={busy}
+          onConfirm={async () => {
+            setBusy(true);
+            const result = await demo.payExtension(loan.id, methodId, outcome);
+            setBusy(false);
+            finish(result);
+          }}
+        >
+          <MethodPicker
+            purpose="EXTENSION"
+            value={methodId}
+            onChange={setMethodId}
+            name="extension-method"
+          />
+          <OutcomePicker value={outcome} onChange={setOutcome} />
+          <Feedback result={error} />
+        </ConfirmDialog>
+      );
+    case 'return':
+    case 'early':
+      return (
+        <ConfirmDialog
+          {...common}
+          className="wide"
+          title={t(
+            dialog === 'early'
+              ? 'loanDialogs.early.title'
+              : 'loanDialogs.return.title',
+          )}
+          description={t('loanDialogs.return.description')}
+          confirmLabel={t('loanDialogs.return.confirm')}
+          disabled={notes.trim().length < 10 || !evidence.length}
+          onConfirm={() =>
+            finish(
+              demo.recordReturn(loan.id, dialog === 'early', notes, evidence),
+            )
+          }
+        >
+          {dialog === 'early' && (
+            <p className="inline-status warning">
+              <AlertTriangle aria-hidden="true" />
+              {t('loanDialogs.early.warning')}
             </p>
-          </div>
-        )}
-        {needsEvidence && (
-          <>
-            <EvidenceUploader
-              phase="FINAL"
-              author={currentUser.name}
-              authorId={currentUser.id}
-              value={evidence}
-              onChange={setEvidence}
-              label="Evidencias finales"
+          )}
+          <EvidenceUploader
+            phase="FINAL"
+            author={user}
+            value={evidence}
+            onChange={setEvidence}
+            label={t('loanDialogs.return.evidenceLabel')}
+          />
+          <Field
+            label={t('loanDialogs.return.notes')}
+            hint={t('validation.min', { count: 10 })}
+            required
+          >
+            <textarea
+              rows={3}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
             />
-            <label className="field">
-              <span>Estado, funcionamiento y observaciones</span>
-              <textarea
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-              />
-            </label>
-          </>
-        )}
-        {dialog === 'confirm' && (
-          <div className="success-box">
-            <CheckCircle2 />
-            <p>
-              Si no existe una incidencia abierta, la garantía se liberará. Si
-              existe, seguirá retenida hasta su resolución.
-            </p>
-          </div>
-        )}
-        {dialog === 'rating' && (
-          <div className="rating-input">
-            <p>¿Cómo fue tu experiencia?</p>
+          </Field>
+          <Feedback result={error} />
+        </ConfirmDialog>
+      );
+    case 'confirmReturn':
+      return (
+        <ConfirmDialog
+          {...common}
+          className="wide"
+          title={t('loanDialogs.confirmReturn.title')}
+          description={t('loanDialogs.confirmReturn.description')}
+          confirmLabel={t('loanDialogs.confirmReturn.confirm')}
+          onConfirm={() => finish(demo.confirmReturn(loan.id))}
+        >
+          <EvidenceGallery
+            title={t('evidence.final')}
+            items={loan.evidence.filter((item) => item.phase === 'FINAL')}
+          />
+          <p className="inline-status">
+            <ShieldCheck aria-hidden="true" />
+            {t('loanDialogs.confirmReturn.guaranteeNote')}
+          </p>
+          <p className="muted small">
+            {t('loanDialogs.confirmReturn.incidentHint')}
+          </p>
+          <Feedback result={error} />
+        </ConfirmDialog>
+      );
+    case 'rating':
+      return (
+        <ConfirmDialog
+          {...common}
+          title={t('loanDialogs.rating.title')}
+          description={t('loanDialogs.rating.description')}
+          confirmLabel={t('loanDialogs.rating.confirm')}
+          disabled={stars < 1}
+          onConfirm={() => finish(demo.rateLoan(loan.id, stars, comment))}
+        >
+          <fieldset className="rating-input">
+            <legend>{t('loanDialogs.rating.stars')}</legend>
             <div>
               {[1, 2, 3, 4, 5].map((value) => (
                 <button
                   type="button"
                   key={value}
-                  onClick={() => setRating(value)}
-                  aria-label={`${value} estrellas`}
+                  onClick={() => setStars(value)}
+                  aria-pressed={value <= stars}
+                  aria-label={t('loanDialogs.rating.starAria', {
+                    count: value,
+                  })}
                 >
-                  <Star fill={value <= rating ? 'currentColor' : 'none'} />
+                  <Star
+                    aria-hidden="true"
+                    fill={value <= stars ? 'currentColor' : 'none'}
+                  />
                 </button>
               ))}
             </div>
-            <label className="field">
-              <span>Comentario</span>
-              <textarea
-                value={comment}
-                onChange={(event) => setComment(event.target.value)}
-              />
-            </label>
-          </div>
-        )}
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
-            Volver
-          </Button>
-          <Button
-            type="button"
-            disabled={
-              (needsEvidence && !evidence.length) ||
-              ((dialog === 'extension' || dialog === 'reschedule') &&
-                !validDate) ||
-              (dialog === 'rating' && (rating < 1 || rating > 5))
-            }
-            onClick={onSubmit}
+          </fieldset>
+          <Field
+            label={t('loanDialogs.rating.comment')}
+            hint={t('loanDialogs.rating.commentHint')}
           >
-            Confirmar
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+            <textarea
+              rows={3}
+              maxLength={400}
+              value={comment}
+              onChange={(event) => setComment(event.target.value)}
+            />
+          </Field>
+          <Feedback result={error} />
+        </ConfirmDialog>
+      );
+    default:
+      return null;
+  }
 }

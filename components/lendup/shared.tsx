@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertCircle,
@@ -10,124 +10,108 @@ import {
   CheckCircle2,
   Circle,
   Clock3,
-  FileText,
-  ImagePlus,
+  ExternalLink,
+  MapPin,
   ShieldCheck,
   Star,
-  Trash2,
-  Upload,
-  Video,
   WalletCards,
+  XCircle,
+  type LucideIcon,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import type { Evidence, Listing, User } from '@/types/domain';
-import { filesToDataUrls } from '@/lib/file-data';
+import { useI18n, type MessageKey } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
+import { googleMapsAdapter } from '@/services/adapters/google-maps';
+import type { EconomicBreakdown } from '@/lib/business-rules';
+import type {
+  AppNotification,
+  Coordinates,
+  Listing,
+  Reminder,
+  TimelineEvent,
+  User,
+} from '@/types/domain';
 
-export const statusLabels: Record<string, string> = {
-  PENDING: 'Pendiente',
-  ACCEPTED: 'Aceptada',
-  REJECTED: 'Rechazada',
-  CANCELLED: 'Cancelada',
-  CONFIRMED: 'Confirmada',
-  ACTIVATED: 'Activada',
-  COMPLETED: 'Finalizado',
-  PENDING_DELIVERY: 'Pendiente de entrega',
-  PENDING_RECEIPT: 'Pendiente de recepción',
-  ACTIVE: 'Activo',
-  RETURN_RECORDED: 'Devolución registrada',
-  RETURN_CONFIRMED_PENDING_INCIDENT:
-    'Devolución confirmada · incidencia pendiente',
-  OVERDUE: 'Vencido',
-  PROCESSING: 'Procesando',
-  SENDING: 'Enviando',
-  SENT: 'Enviado',
-  PAYMENT_PENDING: 'Pago pendiente',
-  PENDING_RELEASE: 'Pendiente de liberación',
-  RELEASED: 'Liberado',
-  REFUNDED: 'Reembolsado',
-  FAILED: 'Fallido',
-  VERIFIED: 'Verificado',
-  NOT_REQUIRED: 'No requerida',
-  HELD: 'Retenida',
-  PARTIALLY_CAPTURED: 'Afectada parcialmente',
-  CAPTURED: 'Afectada totalmente',
-  OPEN: 'Abierta',
-  UNDER_REVIEW: 'En revisión',
-  RESOLVED: 'Resuelta',
-  PAUSED: 'Pausado',
-  ARCHIVED: 'Archivado',
-  IDLE: 'Sin iniciar',
-  ANALYZING: 'Analizando',
-  SUCCESS: 'Disponible',
-  TIMEOUT: 'Tiempo agotado',
-  ERROR: 'Error',
-};
-const variants: Record<
-  string,
-  'default' | 'secondary' | 'outline' | 'destructive'
-> = {
-  ACTIVE: 'default',
-  ACCEPTED: 'default',
-  CONFIRMED: 'default',
-  RELEASED: 'default',
-  COMPLETED: 'default',
-  RESOLVED: 'default',
-  SUCCESS: 'default',
-  REJECTED: 'destructive',
-  CANCELLED: 'destructive',
-  FAILED: 'destructive',
-  OVERDUE: 'destructive',
-  ERROR: 'destructive',
-  PENDING: 'secondary',
-  PAYMENT_PENDING: 'secondary',
-  PENDING_RELEASE: 'secondary',
-  HELD: 'secondary',
-  UNDER_REVIEW: 'secondary',
-  ANALYZING: 'secondary',
+export type StatusKind =
+  | 'request'
+  | 'reservation'
+  | 'loan'
+  | 'payment'
+  | 'guarantee'
+  | 'transaction'
+  | 'incident'
+  | 'extension'
+  | 'reschedule'
+  | 'analysis'
+  | 'listing'
+  | 'verification';
+
+type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
+
+const toneByStatus: Record<string, Tone> = {
+  ACTIVE: 'success',
+  ACCEPTED: 'success',
+  CONFIRMED: 'success',
+  ACTIVATED: 'success',
+  RELEASED: 'success',
+  COMPLETED: 'success',
+  RESOLVED: 'success',
+  SUCCESS: 'success',
+  VERIFIED: 'success',
+  HELD: 'info',
+  PENDING_RELEASE: 'info',
+  PENDING_RECEIPT: 'info',
+  RETURN_RECORDED: 'info',
+  UNDER_REVIEW: 'info',
+  ANALYZING: 'info',
+  SENT: 'info',
+  SENDING: 'info',
+  PROCESSING: 'info',
+  PENDING: 'warning',
+  PAYMENT_PENDING: 'warning',
+  OPEN: 'warning',
+  PAUSED: 'warning',
+  RETURN_CONFIRMED_PENDING_INCIDENT: 'warning',
+  PARTIALLY_CAPTURED: 'warning',
+  TIMEOUT: 'warning',
+  REJECTED: 'danger',
+  CANCELLED: 'danger',
+  FAILED: 'danger',
+  OVERDUE: 'danger',
+  ERROR: 'danger',
+  CAPTURED: 'danger',
+  REFUNDED: 'neutral',
+  NOT_REQUIRED: 'neutral',
+  ARCHIVED: 'neutral',
+  IDLE: 'neutral',
 };
 
-export function StatusBadge({ status }: { status: string }) {
-  const Icon = [
-    'ACTIVE',
-    'ACCEPTED',
-    'CONFIRMED',
-    'RELEASED',
-    'COMPLETED',
-    'RESOLVED',
-    'SUCCESS',
-  ].includes(status)
-    ? CheckCircle2
-    : ['REJECTED', 'CANCELLED', 'FAILED', 'OVERDUE', 'ERROR'].includes(status)
-      ? AlertCircle
-      : Clock3;
+const toneIcon: Record<Tone, LucideIcon> = {
+  success: CheckCircle2,
+  warning: Clock3,
+  danger: XCircle,
+  info: Clock3,
+  neutral: Circle,
+};
+
+export function StatusBadge({
+  kind,
+  status,
+}: {
+  kind: StatusKind;
+  status: string;
+}) {
+  const { t } = useI18n();
+  const tone = toneByStatus[status] ?? 'neutral';
+  const Icon = toneIcon[tone];
   return (
-    <Badge variant={variants[status] ?? 'outline'} className="status-badge">
+    <span className={cn('status-badge', `tone-${tone}`)}>
       <Icon aria-hidden="true" />
-      {statusLabels[status] ?? status}
-    </Badge>
+      {t(`status.${kind}.${status}` as MessageKey)}
+    </span>
   );
 }
-
-export const money = (value: number) =>
-  new Intl.NumberFormat('es-PE', {
-    style: 'currency',
-    currency: 'PEN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(value);
-export const shortDate = (value: string) => {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : new Intl.DateTimeFormat('es-PE', {
-        day: 'numeric',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-      }).format(parsed);
-};
 
 export function PageHeader({
   eyebrow,
@@ -138,50 +122,75 @@ export function PageHeader({
   eyebrow?: string;
   title: string;
   description?: string;
-  action?: React.ReactNode;
+  action?: ReactNode;
 }) {
   return (
     <header className="page-header">
       <div>
         {eyebrow && <p className="eyebrow">{eyebrow}</p>}
         <h1>{title}</h1>
-        {description && <p>{description}</p>}
+        {description && <p className="page-description">{description}</p>}
       </div>
-      {action}
+      {action && <div className="page-actions">{action}</div>}
     </header>
+  );
+}
+
+export function Avatar({
+  user,
+  size = 'md',
+}: {
+  user: User;
+  size?: 'md' | 'lg';
+}) {
+  const { t } = useI18n();
+  return user.avatar ? (
+    <img
+      className={cn('avatar', size === 'lg' && 'avatar-lg')}
+      src={user.avatar}
+      alt={t('common.avatarOf', { name: user.name })}
+    />
+  ) : (
+    <span
+      className={cn('avatar', size === 'lg' && 'avatar-lg')}
+      aria-hidden="true"
+    >
+      {user.initials}
+    </span>
   );
 }
 
 export function UserChip({
   user,
-  detail = false,
+  detail,
+  link = false,
 }: {
   user?: User;
-  detail?: boolean;
+  detail?: string;
+  link?: boolean;
 }) {
+  const { t } = useI18n();
   if (!user) return null;
+  const name = link ? (
+    <Link to={`/users/${user.id}`}>{user.name}</Link>
+  ) : (
+    user.name
+  );
   return (
     <div className="user-chip">
-      {user.avatar ? (
-        <img
-          className="avatar"
-          src={user.avatar}
-          alt={`Avatar de ${user.name}`}
-        />
-      ) : (
-        <span className="avatar">{user.initials}</span>
-      )}
+      <Avatar user={user} />
       <span>
-        <strong>{user.name}</strong>
-        {detail && (
-          <small>
-            {user.university} · {user.campus}
-          </small>
-        )}
+        <strong>
+          {name}
+          {user.verified && (
+            <BadgeCheck
+              className="verified"
+              aria-label={t('common.verifiedUser')}
+            />
+          )}
+        </strong>
+        {detail && <small>{detail}</small>}
       </span>
-      {user.verified && (
-        <BadgeCheck className="verified" aria-label="Usuario verificado" />
-      )}
     </div>
   );
 }
@@ -193,14 +202,18 @@ export function Reputation({
   value: number;
   count?: number;
 }) {
+  const { t, formatNumber } = useI18n();
+  const label =
+    count === undefined
+      ? t('reputation.aria', { value: formatNumber(value) })
+      : t('reputation.ariaWithCount', { value: formatNumber(value), count });
+  if (count === 0)
+    return <span className="reputation empty">{t('reputation.none')}</span>;
   return (
-    <span
-      className="reputation"
-      aria-label={`${value.toFixed(1)} de 5${count !== undefined ? `, ${count} valoraciones` : ''}`}
-    >
+    <span className="reputation" aria-label={label}>
       <Star aria-hidden="true" fill="currentColor" />
-      {value.toFixed(1)}
-      {count !== undefined && <small>({count})</small>}
+      <span aria-hidden="true">{value.toFixed(1)}</span>
+      {count !== undefined && <small aria-hidden="true">({count})</small>}
     </span>
   );
 }
@@ -208,44 +221,57 @@ export function Reputation({
 export function ListingCard({
   listing,
   owner,
+  ownerReputation,
+  own,
+  distanceKm,
 }: {
   listing: Listing;
   owner?: User;
+  ownerReputation: { average: number; count: number };
+  own: boolean;
+  distanceKm?: number;
 }) {
+  const { t, formatMoney, formatNumber } = useI18n();
   return (
     <article className="listing-card">
       <Link
         to={`/objects/${listing.id}`}
         className="listing-image-wrap"
-        aria-label={`Ver ${listing.title}`}
+        aria-label={t('listing.card.open', { title: listing.title })}
       >
         <img
           className="listing-image"
           src={listing.image}
-          alt={listing.title}
+          alt=""
+          loading="lazy"
         />
-        <span className="availability-dot">
-          <Circle fill="currentColor" />
-          Disponible
+        <span className={cn('listing-flag', own && 'own')}>
+          {own ? t('listing.card.yours') : t('listing.card.available')}
         </span>
       </Link>
       <div className="listing-body">
         <div className="listing-meta">
-          <span>{listing.category}</span>
-          <span>{listing.campus}</span>
+          <span>{t(`categories.${listing.category}`)}</span>
+          <span>
+            <MapPin aria-hidden="true" />
+            {listing.campus}
+            {distanceKm !== undefined &&
+              ` · ${t('listing.card.distance', { km: formatNumber(distanceKm) })}`}
+          </span>
         </div>
-        <Link to={`/objects/${listing.id}`}>
-          <h3>{listing.title}</h3>
-        </Link>
+        <h3>
+          <Link to={`/objects/${listing.id}`}>{listing.title}</Link>
+        </h3>
         <div className="listing-owner">
-          <span>{owner?.name ?? listing.university}</span>
-          {owner && (
-            <Reputation value={owner.rating} count={owner.ratingCount} />
-          )}
+          <span>{owner?.name}</span>
+          <Reputation
+            value={ownerReputation.average}
+            count={ownerReputation.count}
+          />
         </div>
         <div className="listing-price">
-          <strong>{money(listing.dailyRate)}</strong>
-          <span>/ día</span>
+          <strong>{formatMoney(listing.dailyRate)}</strong>
+          <span>{t('listing.perDay')}</span>
         </div>
       </div>
     </article>
@@ -257,25 +283,80 @@ export function FinancialCard({
   amount,
   status,
   note,
+  method,
 }: {
   type: 'payment' | 'guarantee';
   amount: number;
   status: string;
   note: string;
+  method?: string;
 }) {
+  const { t, formatMoney } = useI18n();
   const Icon = type === 'payment' ? WalletCards : ShieldCheck;
   return (
     <article className="financial-card">
-      <div className="financial-icon">
+      <span className="financial-icon" aria-hidden="true">
         <Icon />
-      </div>
+      </span>
       <div>
-        <p className="eyebrow">{type === 'payment' ? 'Tarifa' : 'Garantía'}</p>
-        <h3>{money(amount)}</h3>
-        <StatusBadge status={status} />
+        <p className="eyebrow">
+          {type === 'payment'
+            ? t('finance.rentalCharge')
+            : t('finance.guarantee')}
+        </p>
+        <p className="financial-amount">{formatMoney(amount)}</p>
+        <StatusBadge
+          kind={type === 'payment' ? 'payment' : 'guarantee'}
+          status={status}
+        />
+        {method && <p className="muted small">{method}</p>}
         <p className="muted">{note}</p>
       </div>
     </article>
+  );
+}
+
+export function EconomicSummary({
+  breakdown,
+  showGuarantee = true,
+}: {
+  breakdown: EconomicBreakdown;
+  showGuarantee?: boolean;
+}) {
+  const { t, formatMoney } = useI18n();
+  const rows: [string, number][] = [
+    [t('finance.rentalFee', { days: breakdown.days }), breakdown.fee],
+    [t('finance.lendupCommission'), breakdown.commission],
+    ...(breakdown.providerFee > 0
+      ? ([[t('finance.providerFee'), breakdown.providerFee]] as [
+          string,
+          number,
+        ][])
+      : []),
+    ...(showGuarantee && breakdown.guarantee > 0
+      ? ([[t('finance.guaranteeRefundable'), breakdown.guarantee]] as [
+          string,
+          number,
+        ][])
+      : []),
+  ];
+  return (
+    <dl className="economic-summary">
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{formatMoney(value)}</dd>
+        </div>
+      ))}
+      <div className="total">
+        <dt>{t('finance.total')}</dt>
+        <dd>
+          {formatMoney(
+            showGuarantee ? breakdown.total : breakdown.rentalCharge,
+          )}
+        </dd>
+      </div>
+    </dl>
   );
 }
 
@@ -287,7 +368,7 @@ export function EmptyState({
   href,
   onAction,
 }: {
-  icon?: typeof CalendarClock;
+  icon?: LucideIcon;
   title: string;
   description: string;
   action?: string;
@@ -296,12 +377,14 @@ export function EmptyState({
 }) {
   return (
     <div className="empty-state">
-      <Icon />
-      <h3>{title}</h3>
+      <span className="empty-icon" aria-hidden="true">
+        <Icon />
+      </span>
+      <h2>{title}</h2>
       <p>{description}</p>
       {action && href && <Button render={<Link to={href} />}>{action}</Button>}
-      {action && onAction && (
-        <Button type="button" onClick={onAction}>
+      {action && onAction && !href && (
+        <Button type="button" variant="outline" onClick={onAction}>
           {action}
         </Button>
       )}
@@ -309,29 +392,42 @@ export function EmptyState({
   );
 }
 
-export function ErrorState({
-  title = 'No se pudo cargar la información',
-  description = 'Intenta nuevamente en unos segundos.',
-  onRetry,
-}: {
-  title?: string;
-  description?: string;
-  onRetry?: () => void;
-}) {
+export function ErrorState({ onRetry }: { onRetry?: () => void }) {
+  const { t } = useI18n();
   return (
     <EmptyState
       icon={AlertCircle}
-      title={title}
-      description={description}
-      action={onRetry ? 'Reintentar' : undefined}
+      title={t('common.loadError.title')}
+      description={t('common.loadError.description')}
+      action={onRetry ? t('common.retry') : undefined}
       onAction={onRetry}
     />
   );
 }
 
-export function LoadingSkeleton({ cards = 3 }: { cards?: number }) {
+export function NotFound({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  const { t } = useI18n();
   return (
-    <output className="loading-grid" aria-label="Cargando información">
+    <EmptyState
+      icon={AlertCircle}
+      title={title}
+      description={description}
+      action={t('common.backHome')}
+      href="/app"
+    />
+  );
+}
+
+export function LoadingSkeleton({ cards = 3 }: { cards?: number }) {
+  const { t } = useI18n();
+  return (
+    <output className="loading-grid" aria-label={t('common.loading')}>
       {Array.from({ length: cards }, (_, index) => (
         <div className="panel" key={index}>
           <Skeleton className="h-5 w-2/5" />
@@ -343,164 +439,42 @@ export function LoadingSkeleton({ cards = 3 }: { cards?: number }) {
   );
 }
 
-export function EvidenceUploader({
-  phase,
-  author,
-  authorId,
-  value,
-  onChange,
-  label = 'Fotos, videos y notas',
+export function Feedback({
+  result,
 }: {
-  phase: Evidence['phase'];
-  author: string;
-  authorId: string;
-  value: Evidence[];
-  onChange: (evidence: Evidence[]) => void;
-  label?: string;
+  result?: { ok: boolean; message: MessageKey } | null;
 }) {
-  const inputId = useId();
-  const [note, setNote] = useState('');
-  const [fileError, setFileError] = useState('');
-  const addFiles = async (files: FileList | null) => {
-    if (!files) return;
-    try {
-      const encoded = await filesToDataUrls(files);
-      const additions: Evidence[] = encoded.map(({ file, dataUrl }) => ({
-        id: `evidence-${Date.now()}-${file.name}`,
-        phase,
-        type: file.type.startsWith('video/') ? 'VIDEO' : 'PHOTO',
-        label: file.name,
-        description: file.name,
-        author,
-        authorId,
-        createdAt: new Date().toISOString(),
-        url: dataUrl,
-      }));
-      onChange([...value, ...additions]);
-      setFileError('');
-    } catch (error) {
-      setFileError(
-        error instanceof Error ? error.message : 'No se pudo leer el archivo.',
-      );
-    }
-  };
-  const addNote = () => {
-    if (!note.trim()) return;
-    onChange([
-      ...value,
-      {
-        id: `evidence-note-${Date.now()}`,
-        phase,
-        type: 'NOTE',
-        label: note.trim(),
-        description: note.trim(),
-        author,
-        authorId,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-    setNote('');
-  };
+  const { t } = useI18n();
+  if (!result) return null;
   return (
-    <div className="evidence-uploader">
-      <label className="upload-zone compact" htmlFor={inputId}>
-        <ImagePlus />
-        <strong>{label}</strong>
-        <span>Selecciona imágenes o videos desde tu dispositivo.</span>
-        <span className="button-like">
-          <Upload />
-          Seleccionar archivos
-        </span>
-      </label>
-      <input
-        id={inputId}
-        className="sr-only"
-        type="file"
-        accept="image/*,video/*"
-        multiple
-        onChange={(event) => addFiles(event.target.files)}
-      />
-      <div className="evidence-note-input">
-        <label htmlFor={`${inputId}-note`}>Nota de evidencia</label>
-        <textarea
-          id={`${inputId}-note`}
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-          placeholder="Describe el estado o funcionamiento."
-        />
-        <Button
-          type="button"
-          variant="outline"
-          onClick={addNote}
-          disabled={!note.trim()}
-        >
-          <FileText />
-          Agregar nota
-        </Button>
-      </div>
-      {fileError && (
-        <p className="field-error" role="alert">
-          {fileError}
-        </p>
+    <p
+      className={cn('feedback', result.ok ? 'is-success' : 'is-error')}
+      role={result.ok ? 'status' : 'alert'}
+    >
+      {result.ok ? (
+        <CheckCircle2 aria-hidden="true" />
+      ) : (
+        <AlertCircle aria-hidden="true" />
       )}
-      {value.length > 0 && (
-        <div className="evidence-previews">
-          {value.map((item) => (
-            <article key={item.id}>
-              <div>
-                {item.type === 'PHOTO' && item.url ? (
-                  <img src={item.url} alt={item.label} />
-                ) : item.type === 'VIDEO' && item.url ? (
-                  <video src={item.url} controls aria-label={item.label}>
-                    <track
-                      kind="captions"
-                      srcLang="es"
-                      label="Sin audio descriptivo"
-                      src="data:text/vtt,WEBVTT"
-                      default
-                    />
-                  </video>
-                ) : item.type === 'VIDEO' ? (
-                  <Video />
-                ) : (
-                  <FileText />
-                )}
-              </div>
-              <span>{item.label}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label={`Eliminar ${item.label}`}
-                onClick={() =>
-                  onChange(
-                    value.filter((candidate) => candidate.id !== item.id),
-                  )
-                }
-              >
-                <Trash2 />
-              </Button>
-            </article>
-          ))}
-        </div>
-      )}
-    </div>
+      {t(result.message)}
+    </p>
   );
 }
 
-export function Timeline({
-  items,
-}: {
-  items: { id: string; label: string; date: string; complete: boolean }[];
-}) {
+export function Timeline({ items }: { items: TimelineEvent[] }) {
+  const { t, formatDateTime } = useI18n();
   return (
     <ol className="timeline">
       {items.map((item) => (
         <li key={item.id} className={item.complete ? 'complete' : ''}>
-          <span>{item.complete ? <CheckCircle2 /> : <Circle />}</span>
+          <span aria-hidden="true">
+            {item.complete ? <CheckCircle2 /> : <Circle />}
+          </span>
           <div>
-            <strong>{item.label}</strong>
-            <small>{item.date}</small>
+            <strong>{t(`timeline.${item.event}`)}</strong>
+            <small>
+              {item.at ? formatDateTime(item.at) : t('common.pending')}
+            </small>
           </div>
         </li>
       ))}
@@ -509,34 +483,124 @@ export function Timeline({
 }
 
 export function NotificationRow({
-  title,
-  message,
-  time,
-  reminder = false,
-  unread = false,
+  notification,
+  href,
+  onOpen,
 }: {
-  title: string;
-  message: string;
-  time: string;
-  reminder?: boolean;
-  unread?: boolean;
+  notification: AppNotification;
+  href?: string;
+  onOpen?: () => void;
 }) {
-  const Icon = reminder ? CalendarClock : Bell;
-  return (
-    <article
-      className={`notification-row ${reminder ? 'reminder' : ''} ${unread ? 'unread' : ''}`}
-    >
-      <span className="notification-icon">
-        <Icon />
+  const { t, formatRelative } = useI18n();
+  const content = (
+    <>
+      <span className="row-icon" aria-hidden="true">
+        <Bell />
       </span>
       <div>
         <div className="row-title">
-          <strong>{title}</strong>
-          {unread && <span className="unread-dot" aria-label="No leída" />}
+          <strong>
+            {t(`notifications.events.${notification.event}.title`)}
+          </strong>
+          {!notification.read && (
+            <span className="unread-dot">
+              <span className="sr-only">{t('notifications.unread')}</span>
+            </span>
+          )}
         </div>
-        <p>{message}</p>
-        <small>{time}</small>
+        <p>
+          {t(`notifications.events.${notification.event}.message`, {
+            ...notification.params,
+          })}
+        </p>
+        <small>{formatRelative(notification.createdAt)}</small>
       </div>
-    </article>
+    </>
+  );
+  return (
+    <Link
+      to={href ?? notification.href}
+      className={cn('notice-row', !notification.read && 'unread')}
+      onClick={onOpen}
+    >
+      {content}
+    </Link>
+  );
+}
+
+export function ReminderRow({
+  reminder,
+  item,
+}: {
+  reminder: Reminder;
+  item: string;
+}) {
+  const { t, formatDateTime } = useI18n();
+  return (
+    <Link to={reminder.href} className="notice-row reminder">
+      <span className="row-icon" aria-hidden="true">
+        <CalendarClock />
+      </span>
+      <div>
+        <div className="row-title">
+          <strong>{t(`reminders.${reminder.kind}.title`)}</strong>
+        </div>
+        <p>{t(`reminders.${reminder.kind}.message`, { item })}</p>
+        <small>{formatDateTime(reminder.dueAt)}</small>
+      </div>
+    </Link>
+  );
+}
+
+export function MapPreview({
+  place,
+  coordinates,
+}: {
+  place: string;
+  coordinates?: Coordinates;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="map-preview">
+      {googleMapsAdapter.hasEmbed ? (
+        <iframe
+          title={t('maps.embedTitle', { place })}
+          src={googleMapsAdapter.embedUrl(place, coordinates)}
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+        />
+      ) : (
+        <div className="map-placeholder" aria-hidden="true">
+          <MapPin />
+        </div>
+      )}
+      <div className="map-caption">
+        <span>
+          <MapPin aria-hidden="true" />
+          {place}
+        </span>
+        <a
+          href={googleMapsAdapter.searchUrl(place, coordinates)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {t('maps.open')}
+          <ExternalLink aria-hidden="true" />
+        </a>
+      </div>
+    </div>
+  );
+}
+
+export function DefinitionList({ items }: { items: [string, ReactNode][] }) {
+  return (
+    <dl className="definition-list">
+      {items.map(([term, value]) => (
+        <div key={term}>
+          <dt>{term}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }

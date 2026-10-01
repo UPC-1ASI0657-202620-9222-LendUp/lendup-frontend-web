@@ -6,6 +6,7 @@ export type VerificationStatus =
   | 'SENT'
   | 'VERIFIED'
   | 'ERROR';
+export type ListingStatus = 'ACTIVE' | 'PAUSED' | 'ARCHIVED';
 export type RequestStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED';
 export type ReservationStatus =
   | 'CONFIRMED'
@@ -13,20 +14,20 @@ export type ReservationStatus =
   | 'ACTIVATED'
   | 'COMPLETED';
 export type LoanStatus =
-  | 'PENDING_DELIVERY'
   | 'PENDING_RECEIPT'
   | 'ACTIVE'
+  | 'OVERDUE'
   | 'RETURN_RECORDED'
   | 'RETURN_CONFIRMED_PENDING_INCIDENT'
-  | 'COMPLETED'
-  | 'OVERDUE';
+  | 'COMPLETED';
 export type PaymentStatus =
   | 'PENDING'
   | 'PROCESSING'
   | 'PENDING_RELEASE'
   | 'RELEASED'
   | 'REFUNDED'
-  | 'FAILED';
+  | 'FAILED'
+  | 'CANCELLED';
 export type GuaranteeStatus =
   | 'NOT_REQUIRED'
   | 'PENDING'
@@ -36,8 +37,7 @@ export type GuaranteeStatus =
   | 'CANCELLED'
   | 'RELEASED'
   | 'PARTIALLY_CAPTURED'
-  | 'CAPTURED'
-  | 'REFUNDED';
+  | 'CAPTURED';
 export type IncidentType =
   | 'DAMAGE'
   | 'LOSS'
@@ -67,15 +67,36 @@ export type TransactionType =
   | 'GUARANTEE_CAPTURE'
   | 'REFUND'
   | 'EXTENSION_PAYMENT';
+export type TransactionStatus = PaymentStatus | GuaranteeStatus;
+export type EvidencePhase = 'INITIAL' | 'FINAL' | 'INCIDENT';
+export type EvidenceType = 'PHOTO' | 'VIDEO' | 'NOTE';
+export type CategoryCode =
+  | 'CALCULATORS'
+  | 'CAMERAS'
+  | 'BOOKS'
+  | 'TOOLS'
+  | 'ELECTRONICS'
+  | 'OTHER';
+export type ConditionCode = 'NEW' | 'EXCELLENT' | 'VERY_GOOD' | 'GOOD' | 'FAIR';
+export type PaymentPurpose = 'RENTAL' | 'GUARANTEE' | 'EXTENSION';
+export type ProviderOutcome = 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'ERROR';
 
-export interface University {
-  id: string;
-  name: string;
+export interface Coordinates {
+  lat: number;
+  lng: number;
 }
 export interface Campus {
   id: string;
-  universityId: string;
   name: string;
+  district: string;
+  coordinates: Coordinates;
+}
+export interface University {
+  id: string;
+  shortName: string;
+  name: string;
+  emailDomains: string[];
+  campuses: Campus[];
 }
 
 export interface User {
@@ -86,13 +107,10 @@ export interface User {
   phone: string;
   initials: string;
   avatar?: string;
-  university: string;
+  universityId: string;
   campus: string;
   career: string;
   cycle: string;
-  rating: number;
-  ratingCount: number;
-  completedLoans: number;
   verified: boolean;
   verificationStatus: VerificationStatus;
   role: Role;
@@ -113,46 +131,47 @@ export interface AvailabilitySlot {
   status: 'AVAILABLE' | 'RESERVED';
   reservationId?: string;
 }
-export interface TermsSnapshot {
-  dailyRate: number;
-  guaranteeAmount: number;
+export interface ListingTerms {
   usage: string;
   delivery: string;
   returnPolicy: string;
   cancellation: string;
+}
+export interface CancellationPolicy {
+  borrowerRefundRate: number;
+  lenderRefundRate: number;
+}
+export interface TermsSnapshot extends ListingTerms {
+  dailyRate: number;
+  guaranteeAmount: number;
+  commissionRate: number;
+  providerFeeRate: number;
   exchangePlace: string;
   startAt: string;
   endAt: string;
   originalEndAt: string;
-  providerFee: number;
-  cancellationPolicy: {
-    borrowerRefundRate: number;
-    lenderRefundRate: number;
-    description: string;
-  };
+  cancellationPolicy: CancellationPolicy;
+  acceptedAt: string;
 }
 export interface Listing {
   id: string;
   ownerId: string;
   title: string;
-  category: string;
+  category: CategoryCode;
   description: string;
-  condition: string;
-  university: string;
+  condition: ConditionCode;
+  universityId: string;
   campus: string;
   location: string;
   exchangePlace: string;
   dailyRate: number;
   guaranteeAmount: number;
-  status: 'ACTIVE' | 'PAUSED' | 'ARCHIVED';
+  status: ListingStatus;
   image: string;
   media: ListingMedia[];
-  availability: string[];
   availabilitySlots: AvailabilitySlot[];
-  terms: Pick<
-    TermsSnapshot,
-    'usage' | 'delivery' | 'returnPolicy' | 'cancellation'
-  >;
+  terms: ListingTerms;
+  createdAt: string;
 }
 export interface LoanRequest {
   id: string;
@@ -161,8 +180,10 @@ export interface LoanRequest {
   lenderId: string;
   startAt: string;
   endAt: string;
+  message?: string;
   status: RequestStatus;
   createdAt: string;
+  respondedAt?: string;
   snapshot: TermsSnapshot;
 }
 export type ReservationSnapshot = TermsSnapshot;
@@ -178,21 +199,37 @@ export interface Reservation {
   paymentMethod?: string;
   guaranteePaymentMethod?: string;
   deliveryRecorded: boolean;
+  deliveredAt?: string;
   receiptConfirmedAt?: string;
   cancelledAt?: string;
+  cancelledBy?: string;
   cancellationReason?: string;
+  createdAt: string;
   snapshot: ReservationSnapshot;
 }
+export type TimelineEventCode =
+  | 'DELIVERY_RECORDED'
+  | 'RECEIPT_PENDING'
+  | 'RECEIPT_CONFIRMED'
+  | 'RETURN_RECORDED'
+  | 'EARLY_RETURN_RECORDED'
+  | 'RETURN_CONFIRMATION_PENDING'
+  | 'RETURN_CONFIRMED_PENDING_INCIDENT'
+  | 'LOAN_COMPLETED'
+  | 'LOAN_OVERDUE'
+  | 'INCIDENT_REPORTED'
+  | 'INCIDENT_REVIEW'
+  | 'INCIDENT_RESOLVED';
 export interface TimelineEvent {
   id: string;
-  label: string;
-  date: string;
+  event: TimelineEventCode;
+  at?: string;
   complete: boolean;
 }
 export interface Evidence {
   id: string;
-  phase: 'INITIAL' | 'FINAL' | 'INCIDENT';
-  type: 'PHOTO' | 'VIDEO' | 'NOTE';
+  phase: EvidencePhase;
+  type: EvidenceType;
   label: string;
   description: string;
   author: string;
@@ -200,11 +237,16 @@ export interface Evidence {
   createdAt: string;
   url?: string;
 }
+export type AnalysisFindingCode =
+  | 'NO_VISIBLE_CHANGES'
+  | 'MINOR_SURFACE_MARKS'
+  | 'MISSING_ACCESSORY'
+  | 'VISIBLE_DAMAGE';
 export interface EvidenceAnalysis {
   id: string;
   loanId: string;
   status: AnalysisStatus;
-  summary?: string;
+  findings?: AnalysisFindingCode[];
   confidence?: 'LOW' | 'MODERATE' | 'HIGH';
   updatedAt: string;
 }
@@ -227,8 +269,8 @@ export interface LoanReschedule {
   proposedAt: string;
   originalReturnAt: string;
   proposedReturnAt: string;
-  additionalCost: 0;
   status: RescheduleStatus;
+  resultingReturnAt?: string;
   respondedAt?: string;
 }
 export interface LoanReturn {
@@ -247,13 +289,13 @@ export interface Loan {
   paymentStatus: PaymentStatus;
   guaranteeStatus: GuaranteeStatus;
   snapshot: TermsSnapshot;
+  deliveredAt: string;
   currentReturnAt: string;
   originalReturnAt: string;
   actualReturnAt?: string;
   receiptConfirmedAt?: string;
+  completedAt?: string;
   earlyReturn?: boolean;
-  extensionStatus?: ExtensionStatus;
-  extensionEndAt?: string;
   extensions: LoanExtension[];
   reschedules: LoanReschedule[];
   returnRecord?: LoanReturn;
@@ -264,8 +306,10 @@ export interface Loan {
 export interface IncidentResolution {
   decision: IncidentDecision;
   amount: number;
+  refundedAmount: number;
   justification: string;
   resolvedAt: string;
+  resolvedBy: string;
 }
 export interface IncidentAdminNote {
   id: string;
@@ -280,6 +324,7 @@ export interface Incident {
   reportedBy: string;
   description: string;
   counterpartyStatement?: string;
+  counterpartyStatementAt?: string;
   evidence: Evidence[];
   status: IncidentStatus;
   createdAt: string;
@@ -298,23 +343,64 @@ export interface Rating {
   loanId: string;
   createdAt: string;
 }
+export type NotificationEvent =
+  | 'REQUEST_CREATED'
+  | 'REQUEST_CANCELLED'
+  | 'REQUEST_ACCEPTED'
+  | 'REQUEST_REJECTED'
+  | 'RESERVATION_CANCELLED'
+  | 'PAYMENT_CONFIRMED'
+  | 'PAYMENT_FAILED'
+  | 'GUARANTEE_HELD'
+  | 'GUARANTEE_FAILED'
+  | 'DELIVERY_REGISTERED'
+  | 'RECEIPT_CONFIRMED'
+  | 'RENTAL_RELEASED'
+  | 'EXTENSION_REQUESTED'
+  | 'EXTENSION_ACCEPTED_PAYMENT_PENDING'
+  | 'EXTENSION_ACCEPTED'
+  | 'EXTENSION_REJECTED'
+  | 'EXTENSION_PAYMENT_CONFIRMED'
+  | 'RESCHEDULE_PROPOSED'
+  | 'RESCHEDULE_ACCEPTED'
+  | 'RESCHEDULE_REJECTED'
+  | 'RETURN_REGISTERED'
+  | 'EARLY_RETURN_REGISTERED'
+  | 'RETURN_CONFIRMED_PENDING_INCIDENT'
+  | 'LOAN_COMPLETED'
+  | 'LOAN_OVERDUE'
+  | 'INCIDENT_CREATED'
+  | 'INCIDENT_ADMIN_NEW'
+  | 'INCIDENT_UNDER_REVIEW'
+  | 'INCIDENT_RESOLVED'
+  | 'RATING_RECEIVED';
+export interface NotificationParams {
+  item?: string;
+  incidentId?: string;
+  reason?: string;
+}
 export interface AppNotification {
   id: string;
   userId: string;
-  title: string;
-  message: string;
+  event: NotificationEvent;
+  params: NotificationParams;
   createdAt: string;
   read: boolean;
   href: string;
-  event: string;
 }
+export type ReminderKind =
+  | 'PAYMENT_DUE'
+  | 'DELIVERY'
+  | 'RECEIPT'
+  | 'RETURN'
+  | 'RETURN_RECEIPT';
 export interface Reminder {
   id: string;
   userId: string;
   operationId: string;
-  title: string;
+  listingId: string;
+  kind: ReminderKind;
   dueAt: string;
-  kind: 'DELIVERY' | 'RETURN' | 'ACTION';
   href: string;
 }
 export interface PaymentTransaction {
@@ -330,7 +416,7 @@ export interface PaymentTransaction {
   currency: 'PEN';
   method: string;
   providerReference: string;
-  status: PaymentStatus | GuaranteeStatus;
+  status: TransactionStatus;
 }
 export interface TermsAcceptance {
   userId: string;
@@ -338,10 +424,9 @@ export interface TermsAcceptance {
   acceptedAt: string;
 }
 export interface DemoState {
-  version: 3;
+  version: 4;
   currentUserId: string;
   authenticated: boolean;
-  termsAccepted: boolean;
   termsAcceptances: TermsAcceptance[];
   users: User[];
   listings: Listing[];

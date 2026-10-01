@@ -1,20 +1,24 @@
-import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
+import type { Metadata, Viewport } from 'next';
+import '@fontsource-variable/plus-jakarta-sans';
 import './globals.css';
-
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-});
 
 export const metadata: Metadata = {
   title: 'LendUp — Préstamos entre estudiantes',
-  description: 'Presta lo que no usas. Consigue lo que necesitas.',
+  description:
+    'Plataforma de préstamos y alquileres temporales entre estudiantes universitarios verificados.',
+  icons: {
+    icon: [
+      { url: '/brand/icon-32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/brand/icon-64.png', sizes: '64x64', type: 'image/png' },
+    ],
+    apple: '/brand/apple-touch-icon.png',
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#0C79D8',
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -24,11 +28,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

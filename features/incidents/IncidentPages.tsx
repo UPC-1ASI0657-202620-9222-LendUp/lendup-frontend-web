@@ -7,527 +7,627 @@ import {
   useParams,
   useSearchParams,
 } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import {
+  ArrowLeft,
   ArrowRight,
-  BrainCircuit,
-  Camera,
-  CheckCircle2,
   FileCheck2,
   Scale,
   ShieldAlert,
   ShieldCheck,
 } from 'lucide-react';
-import { useForm } from 'react-hook-form';
-import { useQuery } from '@tanstack/react-query';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import {
+  DefinitionList,
   EmptyState,
-  ErrorState,
-  EvidenceUploader,
+  Feedback,
   FinancialCard,
-  LoadingSkeleton,
+  NotFound,
   PageHeader,
   StatusBadge,
   Timeline,
   UserChip,
-  money,
-  shortDate,
 } from '@/components/lendup/shared';
 import {
-  evidenceAnalysisService,
-  incidentService,
-} from '@/services/domain-services';
-import { useDemo } from '@/stores/demo-store';
-import type { Evidence, IncidentDecision, IncidentType } from '@/types/domain';
+  AnalysisPanel,
+  EvidenceGallery,
+  EvidenceUploader,
+} from '@/components/lendup/evidence';
+import { ConfirmDialog, Field } from '@/components/lendup/forms';
+import { useEvidenceAnalysis } from '@/hooks/use-evidence-analysis';
+import { useI18n, type MessageKey } from '@/lib/i18n';
+import { remainingGuarantee } from '@/lib/business-rules';
+import { zonedDayKey } from '@/lib/dates';
+import { incidentTypes } from '@/mocks/catalog';
+import { useDemo, type ActionResult } from '@/stores/demo-store';
+import { currentUserOf, listingById, userById } from '@/stores/selectors';
+import type {
+  Evidence,
+  Incident,
+  IncidentDecision,
+  IncidentStatus,
+  IncidentType,
+} from '@/types/domain';
 
-const typeLabels: Record<IncidentType, string> = {
-  DAMAGE: 'Daño',
-  LOSS: 'Pérdida',
-  LATE_RETURN: 'Retraso',
-  NON_RETURN: 'No devolución',
-  OTHER: 'Otro',
-};
+function IncidentProgress({ incident }: { incident: Incident }) {
+  return (
+    <Timeline
+      items={[
+        {
+          id: 'reported',
+          event: 'INCIDENT_REPORTED',
+          at: incident.createdAt,
+          complete: true,
+        },
+        {
+          id: 'review',
+          event: 'INCIDENT_REVIEW',
+          at: incident.reviewStartedAt,
+          complete: incident.status !== 'OPEN',
+        },
+        {
+          id: 'resolved',
+          event: 'INCIDENT_RESOLVED',
+          at: incident.resolution?.resolvedAt,
+          complete: incident.status === 'RESOLVED',
+        },
+      ]}
+    />
+  );
+}
+
+function ResolutionSummary({ incident }: { incident: Incident }) {
+  const { t, formatMoney, formatDateTime } = useI18n();
+  const { state } = useDemo();
+  if (!incident.resolution) return null;
+  const { resolution } = incident;
+  return (
+    <section className="panel resolution-summary">
+      <p className="eyebrow">{t('incidents.resolution')}</p>
+      <h2>{t(`incidentDecisions.${resolution.decision}.title`)}</h2>
+      <p>{resolution.justification}</p>
+      <DefinitionList
+        items={[
+          [t('incidents.capturedAmount'), formatMoney(resolution.amount)],
+          [
+            t('incidents.refundedAmount'),
+            formatMoney(resolution.refundedAmount),
+          ],
+          [t('incidents.resolvedAt'), formatDateTime(resolution.resolvedAt)],
+          [
+            t('incidents.resolvedBy'),
+            userById(state, resolution.resolvedBy)?.name ?? '',
+          ],
+        ]}
+      />
+    </section>
+  );
+}
 
 export function IncidentsPage() {
+  const { t, formatDateTime } = useI18n();
   const { state, reportIncident } = useDemo();
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const user = currentUserOf(state);
+  const eligibleLoans = state.loans.filter(
+    (loan) =>
+      (loan.borrowerId === state.currentUserId ||
+        loan.lenderId === state.currentUserId) &&
+      loan.status !== 'COMPLETED',
+  );
   const loanParam = params.get('loan');
   const [showForm, setShowForm] = useState(Boolean(loanParam));
-  const [loanId, setLoanId] = useState(loanParam ?? state.loans[0]?.id ?? '');
-  const [type, setType] = useState<IncidentType>('DAMAGE');
+  const [loanId, setLoanId] = useState(
+    eligibleLoans.some((loan) => loan.id === loanParam)
+      ? (loanParam as string)
+      : '',
+  );
+  const [type, setType] = useState<IncidentType | ''>('');
   const [description, setDescription] = useState('');
   const [evidence, setEvidence] = useState<Evidence[]>([]);
-  const current = state.users.find((user) => user.id === state.currentUserId)!;
-  const incidents = state.incidents.filter((incident) => {
-    const loan = state.loans.find((item) => item.id === incident.loanId);
-    return (
-      loan?.borrowerId === state.currentUserId ||
-      loan?.lenderId === state.currentUserId ||
-      current.role === 'ADMIN'
-    );
-  });
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const [touched, setTouched] = useState(false);
+  const mine = state.incidents
+    .filter((incident) => {
+      const loan = state.loans.find((item) => item.id === incident.loanId);
+      return (
+        loan?.borrowerId === state.currentUserId ||
+        loan?.lenderId === state.currentUserId
+      );
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (!user) return null;
+  const errors = {
+    loan: !loanId ? t('validation.select') : undefined,
+    type: !type ? t('validation.select') : undefined,
+    description:
+      description.trim().length < 20
+        ? t('validation.min', { count: 20 })
+        : undefined,
+  };
+
+  const submit = () => {
+    setTouched(true);
+    if (errors.loan || errors.type || errors.description || !type) return;
+    const outcome = reportIncident(loanId, type, description, evidence);
+    setResult(outcome);
+    if (outcome.ok && outcome.id) navigate(`/incidents/${outcome.id}`);
+  };
+
   return (
     <>
       <PageHeader
-        eyebrow="Confianza y seguridad"
-        title="Incidencias"
-        description="Reporta y sigue situaciones que requieren revisión."
+        eyebrow={t('incidents.eyebrow')}
+        title={t('incidents.title')}
+        description={t('incidents.description')}
         action={
-          <Button type="button" onClick={() => setShowForm((value) => !value)}>
-            <ShieldAlert />
-            Reportar incidencia
+          <Button
+            type="button"
+            onClick={() => setShowForm((value) => !value)}
+            aria-expanded={showForm}
+          >
+            <ShieldAlert aria-hidden="true" />
+            {t('incidents.report')}
           </Button>
         }
       />
       {showForm && (
         <section className="panel incident-form">
-          <h2>Nueva incidencia</h2>
-          <div className="field-grid">
-            <label className="field">
-              <span>Préstamo</span>
-              <select
-                value={loanId}
-                onChange={(event) => setLoanId(event.target.value)}
-              >
-                {state.loans
-                  .filter(
-                    (loan) =>
-                      loan.borrowerId === state.currentUserId ||
-                      loan.lenderId === state.currentUserId,
-                  )
-                  .map((loan) => (
-                    <option value={loan.id} key={loan.id}>
-                      {loan.id.toUpperCase()} ·{' '}
-                      {
-                        state.listings.find(
-                          (item) => item.id === loan.listingId,
-                        )?.title
-                      }
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Tipo</span>
-              <select
-                value={type}
-                onChange={(event) =>
-                  setType(event.target.value as IncidentType)
-                }
-              >
-                {Object.entries(typeLabels).map(([value, label]) => (
-                  <option value={value} key={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field wide">
-              <span>Descripción</span>
-              <textarea
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="Describe qué ocurrió y cualquier coordinación previa."
-              />
-            </label>
-            <div className="wide">
-              <EvidenceUploader
-                phase="INCIDENT"
-                author={current.name}
-                authorId={current.id}
-                value={evidence}
-                onChange={setEvidence}
-                label="Evidencias de la incidencia"
-              />
-            </div>
-          </div>
-          <div className="form-footer">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setShowForm(false)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              disabled={!loanId || description.trim().length < 10}
-              onClick={() => {
-                const incidentId = reportIncident(
-                  loanId,
-                  type,
-                  description,
-                  evidence,
-                );
-                if (incidentId) navigate(`/incidents/${incidentId}`);
-              }}
-            >
-              Registrar incidencia
-            </Button>
-          </div>
+          <h2>{t('incidents.newTitle')}</h2>
+          <p className="muted small">{t('incidents.newHint')}</p>
+          {eligibleLoans.length === 0 ? (
+            <p className="muted">{t('incidents.noEligibleLoans')}</p>
+          ) : (
+            <>
+              <div className="field-grid">
+                <Field
+                  label={t('incidents.loan')}
+                  error={touched ? errors.loan : undefined}
+                  required
+                >
+                  <select
+                    value={loanId}
+                    onChange={(event) => setLoanId(event.target.value)}
+                  >
+                    <option value="">{t('common.selectOption')}</option>
+                    {eligibleLoans.map((loan) => (
+                      <option value={loan.id} key={loan.id}>
+                        {listingById(state, loan.listingId)?.title} ·{' '}
+                        {t(`status.loan.${loan.status}`)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field
+                  label={t('incidents.type')}
+                  error={touched ? errors.type : undefined}
+                  required
+                >
+                  <select
+                    value={type}
+                    onChange={(event) =>
+                      setType(event.target.value as IncidentType)
+                    }
+                  >
+                    <option value="">{t('common.selectOption')}</option>
+                    {incidentTypes.map((value) => (
+                      <option value={value} key={value}>
+                        {t(`incidentTypes.${value}`)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field
+                  label={t('incidents.descriptionLabel')}
+                  error={touched ? errors.description : undefined}
+                  hint={t('incidents.descriptionHint')}
+                  wide
+                  required
+                >
+                  <textarea
+                    rows={4}
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                  />
+                </Field>
+                <div className="wide">
+                  <EvidenceUploader
+                    phase="INCIDENT"
+                    author={user}
+                    value={evidence}
+                    onChange={setEvidence}
+                    label={t('incidents.evidenceLabel')}
+                  />
+                </div>
+              </div>
+              <p className="inline-status">
+                <ShieldCheck aria-hidden="true" />
+                {t('incidents.guaranteeHoldNotice')}
+              </p>
+              <Feedback result={result && !result.ok ? result : null} />
+              <div className="form-footer">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowForm(false)}
+                >
+                  {t('common.cancel')}
+                </Button>
+                <Button type="button" onClick={submit}>
+                  {t('incidents.submit')}
+                </Button>
+              </div>
+            </>
+          )}
         </section>
       )}
-      <div className="incident-list">
-        {incidents.map((incident) => {
-          const loan = state.loans.find((item) => item.id === incident.loanId);
-          const listing = state.listings.find(
-            (item) => item.id === loan?.listingId,
-          );
-          return (
-            <Link
-              to={`/incidents/${incident.id}`}
-              key={incident.id}
-              className="incident-card"
-            >
-              <span className="incident-icon">
-                <ShieldAlert />
-              </span>
-              <div>
-                <span className="eyebrow">{incident.id}</span>
-                <h2>
-                  {typeLabels[incident.type]} · {listing?.title}
-                </h2>
-                <p>{incident.description}</p>
-                <small>{shortDate(incident.createdAt)}</small>
-              </div>
-              <div>
-                <StatusBadge status={incident.status} />
-                <ArrowRight />
-              </div>
-            </Link>
-          );
-        })}
-        {!incidents.length && (
+      {mine.length ? (
+        <ul className="incident-list">
+          {mine.map((incident) => {
+            const loan = state.loans.find(
+              (item) => item.id === incident.loanId,
+            );
+            const listing = listingById(state, loan?.listingId);
+            return (
+              <li key={incident.id}>
+                <Link
+                  to={`/incidents/${incident.id}`}
+                  className="incident-card panel"
+                >
+                  <span className="incident-icon" aria-hidden="true">
+                    <ShieldAlert />
+                  </span>
+                  <div>
+                    <p className="eyebrow">
+                      {incident.id} · {t(`incidentTypes.${incident.type}`)}
+                    </p>
+                    <h2>{listing?.title}</h2>
+                    <p className="clamp-2">{incident.description}</p>
+                    <small className="muted">
+                      {t('incidents.reportedBy', {
+                        name: userById(state, incident.reportedBy)?.name ?? '',
+                        date: formatDateTime(incident.createdAt),
+                      })}
+                    </small>
+                  </div>
+                  <div className="incident-card-side">
+                    <StatusBadge kind="incident" status={incident.status} />
+                    <ArrowRight aria-hidden="true" />
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        !showForm && (
           <EmptyState
-            title="No tienes incidencias"
-            description="Tus operaciones no registran situaciones pendientes."
+            icon={ShieldCheck}
+            title={t('incidents.emptyTitle')}
+            description={t('incidents.emptyDescription')}
           />
-        )}
-      </div>
+        )
+      )}
     </>
   );
 }
 
 export function IncidentDetailPage() {
+  const { t, formatDateTime } = useI18n();
   const { id } = useParams();
   const { state, submitCounterpartyStatement } = useDemo();
   const [statement, setStatement] = useState('');
-  const [statementSaved, setStatementSaved] = useState(false);
+  const [result, setResult] = useState<ActionResult | null>(null);
   const incident = state.incidents.find((item) => item.id === id);
-  if (!incident)
+  const loan = state.loans.find((item) => item.id === incident?.loanId);
+  if (!incident || !loan)
     return (
-      <EmptyState
-        title="Incidencia no encontrada"
-        description="No pudimos encontrar este registro."
+      <NotFound
+        title={t('incidents.notFound')}
+        description={t('errors.notFound.description')}
       />
     );
-  const loan = state.loans.find((item) => item.id === incident.loanId)!;
-  const listing = state.listings.find((item) => item.id === loan.listingId)!;
+  const listing = listingById(state, loan.listingId);
+  const reporter = userById(state, incident.reportedBy);
+  const canRespond =
+    incident.status !== 'RESOLVED' &&
+    incident.reportedBy !== state.currentUserId &&
+    !incident.counterpartyStatement;
+
   return (
     <>
+      <Link className="back-link" to="/incidents">
+        <ArrowLeft aria-hidden="true" />
+        {t('incidents.back')}
+      </Link>
       <PageHeader
-        eyebrow={`Incidencia ${incident.id}`}
-        title={`${typeLabels[incident.type]} · ${listing.title}`}
-        description={`Préstamo ${loan.id.toUpperCase()}`}
-        action={<StatusBadge status={incident.status} />}
+        eyebrow={`${incident.id} · ${t(`incidentTypes.${incident.type}`)}`}
+        title={listing?.title ?? ''}
+        description={t('incidents.linkedLoan')}
+        action={<StatusBadge kind="incident" status={incident.status} />}
       />
-      {incident.status === 'UNDER_REVIEW' && (
-        <div className="warning-box strong">
-          <ShieldAlert />
-          <p>
-            <strong>
-              Garantía retenida mientras se revisa esta incidencia.
-            </strong>{' '}
-            No se liberará hasta que exista una resolución.
-          </p>
+      {incident.status !== 'RESOLVED' && (
+        <div className="app-banner warning">
+          <ShieldAlert aria-hidden="true" />
+          <p>{t('incidents.holdBanner')}</p>
         </div>
       )}
       <div className="detail-grid">
         <section className="panel">
-          <span className="eyebrow">Declaración</span>
-          <h2>Información del reportante</h2>
+          <p className="eyebrow">{t('incidents.reporterStatement')}</p>
+          <UserChip
+            user={reporter}
+            detail={formatDateTime(incident.createdAt)}
+          />
           <p>{incident.description}</p>
-          <small>Reportada el {shortDate(incident.createdAt)}</small>
-          {incident.counterpartyStatement && (
+          <p className="eyebrow">{t('incidents.counterpartyStatement')}</p>
+          {incident.counterpartyStatement ? (
             <>
-              <h3>Respuesta de la contraparte</h3>
               <p>{incident.counterpartyStatement}</p>
+              <small className="muted">
+                {formatDateTime(incident.counterpartyStatementAt)}
+              </small>
             </>
+          ) : (
+            <p className="muted">{t('incidents.noStatement')}</p>
           )}
+        </section>
+        <section className="panel">
+          <p className="eyebrow">{t('incidents.progress')}</p>
+          <IncidentProgress incident={incident} />
+          <Button variant="outline" render={<Link to={`/loans/${loan.id}`} />}>
+            {t('incidents.openLoan')}
+          </Button>
         </section>
         <FinancialCard
           type="guarantee"
           amount={incident.guaranteeAmount}
           status={loan.guaranteeStatus}
-          note={
-            incident.status === 'RESOLVED'
-              ? 'Estado actualizado según la resolución.'
-              : 'Retenida durante la revisión.'
-          }
+          note={t(
+            `finance.guaranteeNotes.${loan.guaranteeStatus}` as MessageKey,
+          )}
         />
-        <section className="panel">
-          <span className="eyebrow">Evidencias</span>
-          {incident.evidence.length ? (
-            incident.evidence.map((item) => (
-              <div className="evidence-tile" key={item.id}>
-                {item.url && item.type === 'PHOTO' ? (
-                  <img src={item.url} alt={item.label} />
-                ) : (
-                  <Camera />
-                )}
-                <strong>{item.label}</strong>
-              </div>
-            ))
-          ) : (
-            <p className="muted">No se adjuntaron archivos.</p>
-          )}
-        </section>
-        <section className="panel">
-          <span className="eyebrow">Respuesta administrativa</span>
-          {incident.resolution ? (
-            <>
-              <h2>
-                {incident.resolution.decision === 'NO_IMPACT'
-                  ? 'Sin afectación'
-                  : incident.resolution.decision === 'PARTIAL'
-                    ? 'Afectación parcial'
-                    : 'Afectación total'}
-              </h2>
-              <p>{incident.resolution.justification}</p>
-              <strong>{money(incident.resolution.amount)}</strong>
-              <small>
-                Resuelta el {shortDate(incident.resolution.resolvedAt)}
-              </small>
-            </>
-          ) : (
-            <p className="muted">
-              El equipo está revisando la información de ambas partes.
-            </p>
-          )}
-        </section>
+        <EvidenceGallery
+          title={t('incidents.evidence')}
+          items={incident.evidence}
+        />
       </div>
-      <section className="panel">
-        <Timeline
-          items={[
-            {
-              id: '1',
-              label: 'Incidencia registrada',
-              date: shortDate(incident.createdAt),
-              complete: true,
-            },
-            {
-              id: '2',
-              label: 'Revisión de evidencias',
-              date: incident.status === 'OPEN' ? 'Pendiente' : 'Completada',
-              complete: incident.status !== 'OPEN',
-            },
-            {
-              id: '3',
-              label: 'Resolución administrativa',
-              date: incident.status === 'RESOLVED' ? 'Completada' : 'Pendiente',
-              complete: incident.status === 'RESOLVED',
-            },
-          ]}
-        />
-      </section>
-      {incident.status !== 'RESOLVED' &&
-        incident.reportedBy !== state.currentUserId &&
-        !incident.counterpartyStatement && (
-          <section className="panel">
-            <span className="eyebrow">Tu declaración</span>
-            <h2>Aporta la versión de la contraparte</h2>
-            <label className="field">
-              <span>Declaración</span>
-              <textarea
-                value={statement}
-                onChange={(event) => setStatement(event.target.value)}
-                placeholder="Describe los hechos desde tu perspectiva."
-              />
-            </label>
-            <Button
-              type="button"
-              disabled={statement.trim().length < 10}
-              onClick={() =>
-                setStatementSaved(
-                  submitCounterpartyStatement(incident.id, statement),
-                )
-              }
-            >
-              Guardar declaración
-            </Button>
-            {statementSaved && (
-              <output className="success-text">Declaración guardada.</output>
-            )}
-          </section>
-        )}
+      <ResolutionSummary incident={incident} />
+      {canRespond && (
+        <section className="panel">
+          <p className="eyebrow">{t('incidents.yourStatement')}</p>
+          <h2>{t('incidents.yourStatementTitle')}</h2>
+          <Field
+            label={t('incidents.statementLabel')}
+            hint={t('validation.min', { count: 20 })}
+            required
+          >
+            <textarea
+              rows={4}
+              value={statement}
+              onChange={(event) => setStatement(event.target.value)}
+            />
+          </Field>
+          <Feedback result={result} />
+          <Button
+            type="button"
+            disabled={statement.trim().length < 20}
+            onClick={() =>
+              setResult(submitCounterpartyStatement(incident.id, statement))
+            }
+          >
+            {t('incidents.saveStatement')}
+          </Button>
+        </section>
+      )}
     </>
   );
 }
 
+const incidentStatuses: IncidentStatus[] = ['OPEN', 'UNDER_REVIEW', 'RESOLVED'];
+
 export function AdminIncidentsPage() {
+  const { t, formatDateTime, formatMoney } = useI18n();
   const { state } = useDemo();
-  const [status, setStatus] = useState('');
-  const [type, setType] = useState('');
+  const [status, setStatus] = useState<IncidentStatus | ''>('');
+  const [type, setType] = useState<IncidentType | ''>('');
   const [date, setDate] = useState('');
-  const [loan, setLoan] = useState('');
-  const [order, setOrder] = useState<'asc' | 'desc'>('desc');
-  const {
-    data: loadedIncidents = [],
-    isLoading,
-    isError,
-    refetch,
-  } = useQuery({
-    queryKey: ['admin-incidents', state.incidents],
-    queryFn: () => incidentService.list(state),
-  });
+  const [search, setSearch] = useState('');
+  const [order, setOrder] = useState<'desc' | 'asc'>('desc');
   const incidents = useMemo(
     () =>
-      loadedIncidents
-        .filter(
-          (item) =>
+      state.incidents
+        .filter((item) => {
+          const listing = listingById(
+            state,
+            state.loans.find((loan) => loan.id === item.loanId)?.listingId,
+          );
+          const term = search.trim().toLowerCase();
+          return (
             (!status || item.status === status) &&
             (!type || item.type === type) &&
-            (!loan || item.loanId.toLowerCase().includes(loan.toLowerCase())) &&
-            (!date || item.createdAt.slice(0, 10) === date),
-        )
+            (!date || zonedDayKey(item.createdAt) === date) &&
+            (!term ||
+              `${item.id} ${item.loanId} ${listing?.title ?? ''}`
+                .toLowerCase()
+                .includes(term))
+          );
+        })
         .sort((a, b) =>
           order === 'asc'
             ? a.createdAt.localeCompare(b.createdAt)
             : b.createdAt.localeCompare(a.createdAt),
         ),
-    [loadedIncidents, status, type, date, loan, order],
+    [state, status, type, date, search, order],
+  );
+  const counts = Object.fromEntries(
+    incidentStatuses.map((value) => [
+      value,
+      state.incidents.filter((item) => item.status === value).length,
+    ]),
   );
   const clear = () => {
     setStatus('');
     setType('');
     setDate('');
-    setLoan('');
+    setSearch('');
     setOrder('desc');
   };
-  if (isLoading) return <LoadingSkeleton cards={3} />;
-  if (isError)
-    return (
-      <ErrorState
-        title="No pudimos cargar las incidencias"
-        description="Reintenta la consulta administrativa."
-        onRetry={() => refetch()}
-      />
-    );
+
   return (
     <>
       <PageHeader
-        eyebrow="Administración"
-        title="Incidencias"
-        description="Revisión operativa de evidencias, condiciones y garantías."
+        eyebrow={t('admin.eyebrow')}
+        title={t('admin.title')}
+        description={t('admin.description')}
       />
-      <div className="filter-row">
-        <select
-          aria-label="Estado"
-          value={status}
-          onChange={(event) => setStatus(event.target.value)}
+      <fieldset className="status-chips">
+        <legend className="sr-only">{t('admin.statusFilter')}</legend>
+        <button
+          type="button"
+          aria-pressed={!status}
+          onClick={() => setStatus('')}
         >
-          <option value="">Todos los estados</option>
-          <option value="OPEN">Abierta</option>
-          <option value="UNDER_REVIEW">En revisión</option>
-          <option value="RESOLVED">Resuelta</option>
-        </select>
-        <select
-          aria-label="Tipo"
-          value={type}
-          onChange={(event) => setType(event.target.value)}
-        >
-          <option value="">Todos los tipos</option>
-          {Object.entries(typeLabels).map(([value, label]) => (
-            <option value={value} key={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-        <input
-          aria-label="Fecha"
-          type="date"
-          value={date}
-          onChange={(event) => setDate(event.target.value)}
-        />
-        <input
-          aria-label="Préstamo"
-          placeholder="ID de préstamo"
-          value={loan}
-          onChange={(event) => setLoan(event.target.value)}
-        />
-        <select
-          aria-label="Orden"
-          value={order}
-          onChange={(event) => setOrder(event.target.value as 'asc' | 'desc')}
-        >
-          <option value="desc">Más recientes</option>
-          <option value="asc">Más antiguas</option>
-        </select>
-        <Button type="button" variant="outline" onClick={clear}>
-          Limpiar filtros
-        </Button>
+          {t('admin.all')}{' '}
+          <span className="pill-count">{state.incidents.length}</span>
+        </button>
+        {incidentStatuses.map((value) => (
+          <button
+            type="button"
+            key={value}
+            aria-pressed={status === value}
+            onClick={() => setStatus(value)}
+          >
+            {t(`status.incident.${value}`)}{' '}
+            <span className="pill-count">{counts[value]}</span>
+          </button>
+        ))}
+      </fieldset>
+      <div className="filter-panel open admin-filters">
+        <Field label={t('incidents.type')}>
+          <select
+            value={type}
+            onChange={(event) =>
+              setType(event.target.value as IncidentType | '')
+            }
+          >
+            <option value="">{t('admin.allTypes')}</option>
+            {incidentTypes.map((value) => (
+              <option value={value} key={value}>
+                {t(`incidentTypes.${value}`)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={t('admin.date')}>
+          <input
+            type="date"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+          />
+        </Field>
+        <Field label={t('admin.search')}>
+          <input
+            type="search"
+            value={search}
+            placeholder={t('admin.searchPlaceholder')}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </Field>
+        <Field label={t('admin.order')}>
+          <select
+            value={order}
+            onChange={(event) => setOrder(event.target.value as 'asc' | 'desc')}
+          >
+            <option value="desc">{t('admin.newest')}</option>
+            <option value="asc">{t('admin.oldest')}</option>
+          </select>
+        </Field>
+        <div className="filter-actions">
+          <Button type="button" variant="ghost" onClick={clear}>
+            {t('explore.clear')}
+          </Button>
+        </div>
       </div>
+      <output className="result-count">
+        {t('admin.results', { count: incidents.length })}
+      </output>
       {incidents.length ? (
         <section className="panel table-panel">
           <div className="responsive-table">
             <table>
+              <caption className="sr-only">{t('admin.title')}</caption>
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Préstamo</th>
-                  <th>Tipo</th>
-                  <th>Reportado por</th>
-                  <th>Fecha</th>
-                  <th>Garantía</th>
-                  <th>Estado</th>
-                  <th>
-                    <span className="sr-only">Acciones</span>
+                  <th scope="col">{t('admin.columns.id')}</th>
+                  <th scope="col">{t('admin.columns.object')}</th>
+                  <th scope="col">{t('admin.columns.type')}</th>
+                  <th scope="col">{t('admin.columns.reporter')}</th>
+                  <th scope="col">{t('admin.columns.date')}</th>
+                  <th scope="col">{t('admin.columns.guarantee')}</th>
+                  <th scope="col">{t('admin.columns.status')}</th>
+                  <th scope="col">
+                    <span className="sr-only">
+                      {t('admin.columns.actions')}
+                    </span>
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {incidents.map((incident) => (
-                  <tr key={incident.id}>
-                    <td>
-                      <strong>{incident.id}</strong>
-                    </td>
-                    <td>{incident.loanId.toUpperCase()}</td>
-                    <td>{typeLabels[incident.type]}</td>
-                    <td>
-                      {
-                        state.users.find(
-                          (user) => user.id === incident.reportedBy,
-                        )?.name
-                      }
-                    </td>
-                    <td>{shortDate(incident.createdAt)}</td>
-                    <td>{money(incident.guaranteeAmount)}</td>
-                    <td>
-                      <StatusBadge status={incident.status} />
-                    </td>
-                    <td>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        render={<Link to={`/admin/incidents/${incident.id}`} />}
-                      >
-                        Revisar
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                {incidents.map((incident) => {
+                  const loan = state.loans.find(
+                    (item) => item.id === incident.loanId,
+                  );
+                  return (
+                    <tr key={incident.id}>
+                      <td data-label={t('admin.columns.id')}>
+                        <strong>{incident.id}</strong>
+                      </td>
+                      <td data-label={t('admin.columns.object')}>
+                        {listingById(state, loan?.listingId)?.title}
+                      </td>
+                      <td data-label={t('admin.columns.type')}>
+                        {t(`incidentTypes.${incident.type}`)}
+                      </td>
+                      <td data-label={t('admin.columns.reporter')}>
+                        {userById(state, incident.reportedBy)?.name}
+                      </td>
+                      <td data-label={t('admin.columns.date')}>
+                        {formatDateTime(incident.createdAt)}
+                      </td>
+                      <td data-label={t('admin.columns.guarantee')}>
+                        {formatMoney(incident.guaranteeAmount)}
+                      </td>
+                      <td data-label={t('admin.columns.status')}>
+                        <StatusBadge kind="incident" status={incident.status} />
+                      </td>
+                      <td>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          render={
+                            <Link to={`/admin/incidents/${incident.id}`} />
+                          }
+                        >
+                          {t('admin.review')}
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </section>
       ) : (
         <EmptyState
-          title="No hay incidencias con estos filtros"
-          description="Limpia o cambia los filtros para ver otros registros."
-          action="Limpiar filtros"
+          icon={ShieldCheck}
+          title={t('admin.emptyTitle')}
+          description={t('admin.emptyDescription')}
+          action={t('explore.clear')}
           onAction={clear}
         />
       )}
@@ -535,394 +635,337 @@ export function AdminIncidentsPage() {
   );
 }
 
-const resolutionSchema = (max: number) =>
-  z
-    .object({
-      decision: z.enum(['NO_IMPACT', 'PARTIAL', 'TOTAL']),
-      amount: z.number().min(0),
-      justification: z
-        .string()
-        .min(15, 'Explica la decisión con al menos 15 caracteres'),
-    })
-    .superRefine((value, context) => {
-      if (
-        value.decision === 'PARTIAL' &&
-        (value.amount <= 0 || value.amount > max)
-      )
-        context.addIssue({
-          code: 'custom',
-          path: ['amount'],
-          message: `El monto debe estar entre S/ 0 y ${money(max)}.`,
-        });
-    });
-type ResolutionValues = {
-  decision: IncidentDecision;
-  amount: number;
-  justification: string;
-};
 export function AdminIncidentDetailPage() {
+  const { t, formatDateTime, formatMoney } = useI18n();
   const { id } = useParams();
-  const {
-    state,
-    resolveIncident,
-    saveAnalysis,
-    startIncidentReview,
-    addIncidentAdminNote,
-  } = useDemo();
-  const [adminNote, setAdminNote] = useState('');
   const navigate = useNavigate();
+  const { state, resolveIncident, startIncidentReview, addIncidentAdminNote } =
+    useDemo();
   const incident = state.incidents.find((item) => item.id === id);
-  const alreadyDecided = state.incidents
-    .filter(
-      (item) =>
-        item.loanId === incident?.loanId &&
-        item.id !== incident?.id &&
-        item.status === 'RESOLVED',
-    )
-    .reduce((sum, item) => sum + (item.resolution?.amount ?? 0), 0);
-  const remainingGuarantee = Math.max(
-    0,
-    (incident?.guaranteeAmount ?? 0) - alreadyDecided,
+  const loan = state.loans.find((item) => item.id === incident?.loanId);
+  const { analysis, run } = useEvidenceAnalysis(loan);
+  const [note, setNote] = useState('');
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const available =
+    loan && incident
+      ? remainingGuarantee(state.incidents, loan, incident.id)
+      : 0;
+  const schema = useMemo(
+    () =>
+      z
+        .object({
+          decision: z.enum(['NO_IMPACT', 'PARTIAL', 'TOTAL']),
+          amount: z.number({ error: t('validation.number') }),
+          justification: z
+            .string()
+            .trim()
+            .min(20, t('validation.min', { count: 20 })),
+        })
+        .superRefine((value, context) => {
+          if (
+            value.decision === 'PARTIAL' &&
+            (value.amount <= 0 || value.amount > available)
+          )
+            context.addIssue({
+              code: 'custom',
+              path: ['amount'],
+              message: t('results.incident.invalidAmountDetail', {
+                max: formatMoney(available),
+              }),
+            });
+        }),
+    [t, available, formatMoney],
   );
-  const schema = resolutionSchema(remainingGuarantee);
+  type Values = z.infer<typeof schema>;
   const {
     register,
     handleSubmit,
     watch,
-    formState: { errors, isSubmitting },
-  } = useForm<ResolutionValues>({
+    getValues,
+    formState: { errors },
+  } = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: { decision: 'NO_IMPACT', amount: 0, justification: '' },
   });
-  const decision = watch('decision');
-  if (!incident)
+  const decision = watch('decision') as IncidentDecision;
+  const amountValue = watch('amount');
+  if (!incident || !loan)
     return (
-      <ErrorState
-        title="Incidencia no encontrada"
-        description="El registro solicitado no existe."
+      <NotFound
+        title={t('incidents.notFound')}
+        description={t('errors.notFound.description')}
       />
     );
-  const loan = state.loans.find((item) => item.id === incident.loanId)!;
-  const listing = state.listings.find((item) => item.id === loan.listingId)!;
-  const lender = state.users.find((user) => user.id === loan.lenderId);
-  const borrower = state.users.find((user) => user.id === loan.borrowerId);
-  const analysis = state.analyses.find((item) => item.loanId === loan.id);
-  const analyze = async () => {
-    saveAnalysis({
-      id: `analysis-${loan.id}`,
-      loanId: loan.id,
-      status: 'ANALYZING',
-      updatedAt: new Date().toISOString(),
-    });
-    saveAnalysis(await evidenceAnalysisService.analyze(loan.id));
-  };
-  const submit = (values: ResolutionValues) => {
-    const amount =
-      values.decision === 'TOTAL'
-        ? remainingGuarantee
-        : values.decision === 'NO_IMPACT'
-          ? 0
-          : values.amount;
-    const result = resolveIncident(
+  const listing = listingById(state, loan.listingId);
+  const lender = userById(state, loan.lenderId);
+  const borrower = userById(state, loan.borrowerId);
+  const captured =
+    decision === 'TOTAL'
+      ? available
+      : decision === 'PARTIAL'
+        ? Math.max(0, Number(amountValue) || 0)
+        : 0;
+
+  const resolve = () => {
+    const values = getValues();
+    const outcome = resolveIncident(
       incident.id,
       values.decision,
-      amount,
+      values.decision === 'PARTIAL' ? values.amount : 0,
       values.justification,
     );
-    if (result.ok) navigate('/admin/incidents');
+    setResult(outcome);
+    setConfirmOpen(false);
+    if (outcome.ok) navigate('/admin/incidents');
   };
+
   return (
     <>
+      <Link className="back-link" to="/admin/incidents">
+        <ArrowLeft aria-hidden="true" />
+        {t('admin.back')}
+      </Link>
       <PageHeader
-        eyebrow={`Administración · ${incident.id}`}
-        title={listing.title}
-        description={`Revisión del préstamo ${loan.id.toUpperCase()}`}
+        eyebrow={`${t('admin.eyebrow')} · ${incident.id}`}
+        title={listing?.title ?? ''}
+        description={`${t(`incidentTypes.${incident.type}`)} · ${formatDateTime(incident.createdAt)}`}
         action={
           <div className="header-actions">
-            <StatusBadge status={incident.status} />
+            <StatusBadge kind="incident" status={incident.status} />
             {incident.status === 'OPEN' && (
               <Button
                 type="button"
-                onClick={() => startIncidentReview(incident.id)}
+                onClick={() => setResult(startIncidentReview(incident.id))}
               >
-                Iniciar revisión
+                {t('admin.startReview')}
               </Button>
             )}
           </div>
         }
       />
-      <div className="admin-summary">
+      <Feedback result={result} />
+      <div className="detail-grid three">
         <section className="panel">
-          <span className="eyebrow">Prestamista</span>
-          <UserChip user={lender} detail />
+          <p className="eyebrow">{t('roles.LENDER')}</p>
+          <UserChip user={lender} link detail={lender?.email} />
         </section>
         <section className="panel">
-          <span className="eyebrow">Prestatario</span>
-          <UserChip user={borrower} detail />
+          <p className="eyebrow">{t('roles.BORROWER')}</p>
+          <UserChip user={borrower} link detail={borrower?.email} />
         </section>
         <FinancialCard
           type="guarantee"
           amount={loan.snapshot.guaranteeAmount}
           status={loan.guaranteeStatus}
-          note="Monto máximo disponible para una posible afectación."
+          note={t('admin.availableGuarantee', {
+            amount: formatMoney(available),
+          })}
         />
       </div>
       <section className="panel conditions-panel">
         <div className="section-heading">
           <div>
-            <span className="eyebrow">Condiciones congeladas</span>
-            <h2>Acuerdo confirmado</h2>
+            <p className="eyebrow">{t('operations.frozenConditions')}</p>
+            <h2>{t('admin.agreement')}</h2>
           </div>
-          <FileCheck2 />
+          <FileCheck2 aria-hidden="true" />
         </div>
-        <dl>
-          <div>
-            <dt>Uso</dt>
-            <dd>{loan.snapshot.usage}</dd>
-          </div>
-          <div>
-            <dt>Entrega</dt>
-            <dd>{loan.snapshot.delivery}</dd>
-          </div>
-          <div>
-            <dt>Devolución</dt>
-            <dd>{loan.snapshot.returnPolicy}</dd>
-          </div>
-          <div>
-            <dt>Lugar</dt>
-            <dd>{loan.snapshot.exchangePlace}</dd>
-          </div>
-          <div>
-            <dt>Fechas</dt>
-            <dd>
-              {shortDate(loan.snapshot.startAt)} —{' '}
-              {shortDate(loan.snapshot.originalEndAt)}
-            </dd>
-          </div>
-        </dl>
+        <DefinitionList
+          items={[
+            [t('fields.usage'), loan.snapshot.usage],
+            [t('fields.delivery'), loan.snapshot.delivery],
+            [t('fields.returnPolicy'), loan.snapshot.returnPolicy],
+            [t('fields.exchangePlace'), loan.snapshot.exchangePlace],
+            [
+              t('admin.agreedPeriod'),
+              `${formatDateTime(loan.snapshot.startAt)} – ${formatDateTime(loan.snapshot.originalEndAt)}`,
+            ],
+            [
+              t('loanDetail.currentReturn'),
+              formatDateTime(loan.currentReturnAt),
+            ],
+            [
+              t('admin.loanStatus'),
+              <StatusBadge key="s" kind="loan" status={loan.status} />,
+            ],
+          ]}
+        />
       </section>
       <div className="two-panel-grid">
         <section className="panel">
-          <span className="eyebrow">Declaración del reportante</span>
+          <p className="eyebrow">{t('incidents.reporterStatement')}</p>
+          <UserChip
+            user={userById(state, incident.reportedBy)}
+            detail={formatDateTime(incident.createdAt)}
+          />
           <p>{incident.description}</p>
         </section>
         <section className="panel">
-          <span className="eyebrow">Declaración de contraparte</span>
-          <p>
-            {incident.counterpartyStatement ?? 'Sin declaración registrada.'}
-          </p>
+          <p className="eyebrow">{t('incidents.counterpartyStatement')}</p>
+          <p>{incident.counterpartyStatement ?? t('incidents.noStatement')}</p>
+          {incident.counterpartyStatementAt && (
+            <small className="muted">
+              {formatDateTime(incident.counterpartyStatementAt)}
+            </small>
+          )}
         </section>
       </div>
-      <div className="evidence-comparison">
-        <AdminEvidence
-          title="Evidencias iniciales"
-          items={loan.evidence.filter((item) => item.phase === 'INITIAL')}
-        />
-        <AdminEvidence
-          title="Evidencias finales e incidencia"
-          items={[
-            ...loan.evidence.filter((item) => item.phase === 'FINAL'),
-            ...incident.evidence,
-          ]}
-        />
-      </div>
-      <section className="ai-banner">
-        <BrainCircuit />
-        <div>
-          <strong>Análisis automático · {analysis?.status ?? 'IDLE'}</strong>
-          <p>
-            {analysis?.summary ?? 'Todavía no se ejecutó el análisis simulado.'}
-          </p>
-          <small>
-            El análisis automático es únicamente información de apoyo y no
-            determina responsabilidades.
-          </small>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={analyze}
-          disabled={analysis?.status === 'ANALYZING'}
-        >
-          {analysis?.status === 'ANALYZING'
-            ? 'Analizando…'
-            : 'Ejecutar simulación'}
-        </Button>
-      </section>
       <section className="panel">
-        <span className="eyebrow">Timeline del préstamo</span>
-        <Timeline items={loan.timeline} />
+        <p className="eyebrow">{t('evidence.title')}</p>
+        <div className="evidence-comparison three">
+          <EvidenceGallery
+            title={t('evidence.initial')}
+            items={loan.evidence.filter((item) => item.phase === 'INITIAL')}
+          />
+          <EvidenceGallery
+            title={t('evidence.final')}
+            items={loan.evidence.filter((item) => item.phase === 'FINAL')}
+          />
+          <EvidenceGallery
+            title={t('incidents.evidence')}
+            items={incident.evidence}
+          />
+        </div>
+        <AnalysisPanel
+          analysis={analysis}
+          evidence={loan.evidence}
+          onAnalyze={run}
+        />
       </section>
-      {incident.status !== 'RESOLVED' && (
+      <div className="two-panel-grid">
         <section className="panel">
-          <span className="eyebrow">Notas administrativas</span>
-          <h2>Seguimiento de revisión</h2>
+          <p className="eyebrow">{t('admin.loanTimeline')}</p>
+          <Timeline items={loan.timeline} />
+        </section>
+        <section className="panel">
+          <p className="eyebrow">{t('admin.notes')}</p>
           {incident.adminNotes.length ? (
-            <div className="history-list">
-              {incident.adminNotes.map((note) => (
-                <article key={note.id}>
-                  <strong>{note.text}</strong>
-                  <span>{shortDate(note.createdAt)}</span>
-                </article>
+            <ul className="history-list">
+              {incident.adminNotes.map((item) => (
+                <li key={item.id}>
+                  <p>{item.text}</p>
+                  <small className="muted">
+                    {userById(state, item.adminId)?.name} ·{' '}
+                    {formatDateTime(item.createdAt)}
+                  </small>
+                </li>
               ))}
-            </div>
+            </ul>
           ) : (
-            <p className="muted">No hay notas administrativas.</p>
+            <p className="muted">{t('admin.noNotes')}</p>
           )}
           {incident.status === 'UNDER_REVIEW' ? (
             <>
-              <label className="field">
-                <span>Nueva nota</span>
+              <Field label={t('admin.newNote')}>
                 <textarea
-                  value={adminNote}
-                  onChange={(event) => setAdminNote(event.target.value)}
+                  rows={3}
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
                 />
-              </label>
+              </Field>
               <Button
                 type="button"
                 variant="outline"
-                disabled={adminNote.trim().length < 3}
+                disabled={note.trim().length < 5}
                 onClick={() => {
-                  if (addIncidentAdminNote(incident.id, adminNote))
-                    setAdminNote('');
+                  const outcome = addIncidentAdminNote(incident.id, note);
+                  setResult(outcome);
+                  if (outcome.ok) setNote('');
                 }}
               >
-                Agregar nota
+                {t('admin.addNote')}
               </Button>
             </>
-          ) : (
-            <p className="muted">
-              Inicia la revisión para registrar notas administrativas.
-            </p>
-          )}
+          ) : incident.status === 'OPEN' ? (
+            <p className="muted small">{t('admin.startToNote')}</p>
+          ) : null}
         </section>
-      )}
-      {incident.status === 'UNDER_REVIEW' ? (
-        <form className="panel resolution-form" onSubmit={handleSubmit(submit)}>
+      </div>
+      {incident.status === 'UNDER_REVIEW' && (
+        <form
+          className="panel resolution-form"
+          onSubmit={handleSubmit(() => setConfirmOpen(true))}
+          noValidate
+        >
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Resolución administrativa</span>
-              <h2>Decisión sobre la garantía</h2>
+              <p className="eyebrow">{t('admin.resolution')}</p>
+              <h2>{t('admin.resolutionTitle')}</h2>
             </div>
-            <Scale />
+            <Scale aria-hidden="true" />
           </div>
-          <div className="decision-grid">
-            {(
-              [
-                {
-                  value: 'NO_IMPACT',
-                  title: 'Sin afectación',
-                  detail: 'Liberar garantía completa',
-                },
-                {
-                  value: 'PARTIAL',
-                  title: 'Afectación parcial',
-                  detail: 'Capturar un monto y liberar el saldo',
-                },
-                {
-                  value: 'TOTAL',
-                  title: 'Afectación total',
-                  detail: 'Capturar toda la garantía',
-                },
-              ] as const
-            ).map((option) => (
+          <fieldset className="decision-grid">
+            <legend className="sr-only">{t('admin.resolutionTitle')}</legend>
+            {(['NO_IMPACT', 'PARTIAL', 'TOTAL'] as const).map((value) => (
               <label
-                key={option.value}
-                className={decision === option.value ? 'selected' : ''}
+                key={value}
+                className={decision === value ? 'selected' : ''}
               >
-                <input
-                  type="radio"
-                  value={option.value}
-                  {...register('decision')}
-                />
-                <ShieldCheck />
+                <input type="radio" value={value} {...register('decision')} />
+                <ShieldCheck aria-hidden="true" />
                 <span>
-                  <strong>{option.title}</strong>
-                  <small>{option.detail}</small>
+                  <strong>{t(`incidentDecisions.${value}.title`)}</strong>
+                  <small>{t(`incidentDecisions.${value}.detail`)}</small>
                 </span>
               </label>
             ))}
-          </div>
+          </fieldset>
           {decision === 'PARTIAL' && (
-            <label className="field">
-              <span>
-                Monto de afectación (máximo {money(remainingGuarantee)})
-              </span>
+            <Field
+              label={t('admin.amount', { max: formatMoney(available) })}
+              error={errors.amount?.message}
+              required
+            >
               <input
                 type="number"
-                step="0.01"
+                inputMode="decimal"
+                step="0.5"
+                min="0"
+                max={available}
                 {...register('amount', { valueAsNumber: true })}
               />
-              {errors.amount && (
-                <small className="field-error">{errors.amount.message}</small>
-              )}
-            </label>
+            </Field>
           )}
-          <label className="field">
-            <span>Justificación</span>
-            <textarea
-              {...register('justification')}
-              placeholder="Explica la decisión usando evidencias y condiciones."
-            />
-            {errors.justification && (
-              <small className="field-error">
-                {errors.justification.message}
-              </small>
-            )}
-          </label>
+          <dl className="economic-summary">
+            <div>
+              <dt>{t('incidents.capturedAmount')}</dt>
+              <dd>{formatMoney(captured)}</dd>
+            </div>
+            <div className="total">
+              <dt>{t('incidents.refundedAmount')}</dt>
+              <dd>{formatMoney(Math.max(0, available - captured))}</dd>
+            </div>
+          </dl>
+          <Field
+            label={t('admin.justification')}
+            error={errors.justification?.message}
+            hint={t('admin.justificationHint')}
+            required
+          >
+            <textarea rows={4} {...register('justification')} />
+          </Field>
+          <p className="muted small">{t('admin.aiReminder')}</p>
           <div className="form-footer">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => navigate('/admin/incidents')}
-            >
-              Volver
-            </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              Resolver incidencia
-            </Button>
+            <Button type="submit">{t('admin.resolve')}</Button>
           </div>
         </form>
-      ) : incident.status === 'RESOLVED' ? (
-        <section className="panel">
-          <CheckCircle2 />
-          <h2>Incidencia resuelta</h2>
-          <p>{incident.resolution?.justification}</p>
-        </section>
-      ) : (
-        <section className="panel">
-          <ShieldAlert />
-          <h2>La revisión todavía no ha comenzado</h2>
-          <p>
-            Inicia la revisión antes de registrar notas o resolver la garantía.
-          </p>
-        </section>
       )}
+      {incident.status === 'RESOLVED' && (
+        <ResolutionSummary incident={incident} />
+      )}
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={t('admin.confirmTitle')}
+        description={t('admin.confirmDescription', {
+          decision: t(`incidentDecisions.${decision}.title`),
+          captured: formatMoney(captured),
+          refunded: formatMoney(Math.max(0, available - captured)),
+        })}
+        confirmLabel={t('admin.resolve')}
+        onConfirm={resolve}
+      />
     </>
-  );
-}
-
-function AdminEvidence({ title, items }: { title: string; items: Evidence[] }) {
-  return (
-    <section className="panel">
-      <span className="eyebrow">{title}</span>
-      {items.length ? (
-        items.map((item) => (
-          <div className="evidence-tile" key={item.id}>
-            {item.url && item.type === 'PHOTO' ? (
-              <img src={item.url} alt={item.label} />
-            ) : (
-              <Camera />
-            )}
-            <strong>{item.label}</strong>
-            <span>
-              {item.author} · {shortDate(item.createdAt)}
-            </span>
-          </div>
-        ))
-      ) : (
-        <p className="muted">No se registraron evidencias.</p>
-      )}
-    </section>
   );
 }

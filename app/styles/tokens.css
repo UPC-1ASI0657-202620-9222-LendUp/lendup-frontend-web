@@ -1,0 +1,78 @@
+/* ---------- Design tokens ---------- */
+:root {
+  --font-brand:
+    'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', system-ui, -apple-system,
+    'Segoe UI', Roboto, sans-serif;
+
+  --brand-50: #f1f8ff;
+  --brand-100: #e0f0ff;
+  --brand-200: #bfe2ff;
+  --brand-300: #68c4ff;
+  --brand-400: #2e9eff;
+  --brand-500: #0c79d8;
+  --brand-600: #0a6bc4;
+  --brand-700: #0858a3;
+  --brand-800: #07427b;
+  --brand-900: #0a1f3c;
+  --brand-950: #06142a;
+
+  --ink: #0f1b2d;
+  --ink-soft: #334155;
+  --ink-muted: #5b6b82;
+  --surface: #ffffff;
+  --surface-alt: #f5f8fc;
+  --surface-sunken: #eef3f9;
+  --line: #e1e8f1;
+  --line-strong: #cbd6e4;
+
+  --success: #0f8a6c;
+  --success-soft: #e3f6f0;
+  --warning: #9a5b00;
+  --warning-soft: #fff3dc;
+  --danger: #c4322f;
+  --danger-soft: #fdeaea;
+  --info: var(--brand-600);
+  --info-soft: var(--brand-50);
+  --violet: #6d4bd8;
+  --violet-soft: #efeafd;
+
+  --shadow-xs: 0 1px 2px rgb(15 27 45 / 6%);
+  --shadow-sm: 0 1px 3px rgb(15 27 45 / 8%), 0 1px 2px rgb(15 27 45 / 4%);
+  --shadow-md: 0 8px 24px -12px rgb(10 31 60 / 22%);
+  --shadow-lg: 0 24px 48px -24px rgb(10 31 60 / 35%);
+
+  --sidebar-width: 17rem;
+  --topbar-height: 4rem;
+  --mobile-nav-height: 4.25rem;
+  --content-max: 76rem;
+  --gutter: clamp(1rem, 3vw, 2rem);
+  --touch: 2.75rem;
+
+  --background: var(--surface-alt);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--brand-600);
+  --primary-foreground: #ffffff;
+  --secondary: var(--brand-100);
+  --secondary-foreground: var(--brand-800);
+  --muted: var(--surface-sunken);
+  --muted-foreground: var(--ink-muted);
+  --accent: var(--brand-50);
+  --accent-foreground: var(--brand-800);
+  --destructive: var(--danger);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--brand-400);
+  --radius: 0.75rem;
+  --sidebar: var(--brand-900);
+  --sidebar-foreground: #dbe7f6;
+  --sidebar-primary: var(--brand-300);
+  --sidebar-primary-foreground: var(--brand-950);
+  --sidebar-accent: rgb(255 255 255 / 8%);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(255 255 255 / 10%);
+  --sidebar-ring: var(--brand-300);
+}

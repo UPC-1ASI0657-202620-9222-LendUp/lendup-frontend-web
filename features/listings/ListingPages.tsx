@@ -15,17 +15,19 @@ import {
   ArrowLeft,
   ArrowRight,
   CalendarDays,
-  Camera,
   Check,
   CheckCircle2,
   Edit3,
   ImagePlus,
-  MapPin,
+  LocateFixed,
   Pause,
+  Play,
   Plus,
   Search,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
+  TriangleAlert,
   Upload,
   X,
 } from 'lucide-react';
@@ -39,39 +41,70 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
+  DefinitionList,
+  EconomicSummary,
   EmptyState,
   ErrorState,
+  Feedback,
   ListingCard,
   LoadingSkeleton,
+  MapPreview,
+  NotFound,
   PageHeader,
   Reputation,
   StatusBadge,
   UserChip,
-  money,
-  shortDate,
 } from '@/components/lendup/shared';
-import { useDemo } from '@/stores/demo-store';
-import { listingService } from '@/services/domain-services';
+import { ConfirmDialog, Field } from '@/components/lendup/forms';
 import {
-  economicBreakdown,
-  isPeriodAvailable,
-  overlaps,
-} from '@/lib/business-rules';
-import { filesToDataUrls } from '@/lib/file-data';
-import type { AvailabilitySlot, ListingMedia } from '@/types/domain';
+  addDays,
+  atZonedTime,
+  fromZonedInput,
+  today,
+  toZonedInput,
+} from '@/lib/dates';
+import { useOperationGate } from '@/hooks/use-operation-gate';
+import { useI18n } from '@/lib/i18n';
+import { isPeriodAvailable, overlaps } from '@/lib/business-rules';
+import { cloudinaryAdapter, UploadError } from '@/services/adapters/cloudinary';
+import { googleMapsAdapter } from '@/services/adapters/google-maps';
+import {
+  campusCoordinates,
+  catalogService,
+  emptyListingFilters,
+  findUniversity,
+  matchesFilters,
+  sortByDistance,
+  type ListingFilters,
+} from '@/services/catalog.service';
+import { quoteListing } from '@/services/payments.service';
+import { useDemo, type ActionResult } from '@/stores/demo-store';
+import {
+  currentUserOf,
+  pendingRequestsFor,
+  reputationOf,
+  userById,
+} from '@/stores/selectors';
+import type {
+  AvailabilitySlot,
+  CategoryCode,
+  ConditionCode,
+  Coordinates,
+  ListingMedia,
+  ListingStatus,
+} from '@/types/domain';
 
 export function ExplorePage() {
+  const { t } = useI18n();
   const { state } = useDemo();
   const [params] = useSearchParams();
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState<ListingFilters>({
+    ...emptyListingFilters,
     query: params.get('q') ?? '',
-    category: '',
-    university: '',
-    campus: '',
-    location: '',
-    date: '',
-    time: '',
   });
+  const [showFilters, setShowFilters] = useState(false);
+  const [origin, setOrigin] = useState<Coordinates | null>(null);
+  const [locationError, setLocationError] = useState('');
   const {
     data = [],
     isLoading,
@@ -79,144 +112,202 @@ export function ExplorePage() {
     refetch,
   } = useQuery({
     queryKey: ['listings', state.listings],
-    queryFn: () => listingService.getListings(state),
+    queryFn: () => catalogService.searchListings(state.listings, filters),
   });
-  const filtered = useMemo(
-    () =>
-      data.filter((item) => {
-        const text =
-          `${item.title} ${item.category} ${item.description}`.toLowerCase();
-        const matchesDate =
-          !filters.date ||
-          item.availabilitySlots.some(
-            (slot) =>
-              slot.status === 'AVAILABLE' &&
-              new Date(slot.startAt) <=
-                new Date(`${filters.date}T${filters.time || '23:59'}`) &&
-              new Date(slot.endAt) >=
-                new Date(`${filters.date}T${filters.time || '00:00'}`),
-          );
-        return (
-          (!filters.query || text.includes(filters.query.toLowerCase())) &&
-          (!filters.category || item.category === filters.category) &&
-          (!filters.university || item.university === filters.university) &&
-          (!filters.campus || item.campus === filters.campus) &&
-          (!filters.location ||
-            item.location
-              .toLowerCase()
-              .includes(filters.location.toLowerCase())) &&
-          matchesDate
-        );
-      }),
-    [data, filters],
+  const university = findUniversity(filters.universityId);
+  const campuses = university
+    ? university.campuses.map((campus) => campus.name)
+    : Array.from(new Set(data.map((item) => item.campus)));
+  const invalidPeriod = Boolean(
+    filters.from &&
+    filters.to &&
+    new Date(filters.to) <= new Date(filters.from),
   );
-  const update = (key: keyof typeof filters, value: string) =>
-    setFilters((current) => ({ ...current, [key]: value }));
-  const clear = () =>
-    setFilters({
-      query: '',
-      category: '',
-      university: '',
-      campus: '',
-      location: '',
-      date: '',
-      time: '',
-    });
+  const results = useMemo(() => {
+    const filtered = data.filter((listing) =>
+      matchesFilters(listing, filters, (code) => t(`categories.${code}`)),
+    );
+    return origin
+      ? sortByDistance(filtered, origin)
+      : filtered.map((listing) => ({ listing, distance: undefined }));
+  }, [data, filters, origin, t]);
+  const activeFilters = Object.entries(filters).filter(
+    ([key, value]) => key !== 'query' && value,
+  ).length;
+  const update = <K extends keyof ListingFilters>(
+    key: K,
+    value: ListingFilters[K],
+  ) =>
+    setFilters((current) => ({
+      ...current,
+      [key]: value,
+      ...(key === 'universityId' ? { campus: '' } : {}),
+    }));
+  const clear = () => {
+    setFilters(emptyListingFilters);
+    setOrigin(null);
+  };
+  const locate = async () => {
+    try {
+      setOrigin(await googleMapsAdapter.currentPosition());
+      setLocationError('');
+    } catch {
+      setLocationError(t('explore.locationDenied'));
+    }
+  };
+
   return (
     <>
       <PageHeader
-        eyebrow="Comunidad LendUp"
-        title="Encuentra lo que necesitas"
-        description="Objetos disponibles dentro de comunidades universitarias verificadas."
+        eyebrow={t('explore.eyebrow')}
+        title={t('explore.title')}
+        description={t('explore.description')}
       />
-      <div className="search-bar">
-        <Search />
-        <input
-          aria-label="Buscar objetos"
-          value={filters.query}
-          onChange={(event) => update('query', event.target.value)}
-          placeholder="Buscar calculadoras, cámaras, libros…"
-        />
-      </div>
-      <div className="filter-row">
-        <select
-          aria-label="Categoría"
-          value={filters.category}
-          onChange={(event) => update('category', event.target.value)}
+      <search>
+        <form
+          className="search-bar"
+          onSubmit={(event) => event.preventDefault()}
         >
-          <option value="">Todas las categorías</option>
-          {[
-            'Calculadoras',
-            'Cámaras',
-            'Libros',
-            'Herramientas',
-            'Electrónica',
-          ].map((value) => (
-            <option key={value}>{value}</option>
-          ))}
-        </select>
-        <select
-          aria-label="Universidad"
-          value={filters.university}
-          onChange={(event) => update('university', event.target.value)}
+          <Search aria-hidden="true" />
+          <input
+            type="search"
+            aria-label={t('explore.searchLabel')}
+            value={filters.query}
+            onChange={(event) => update('query', event.target.value)}
+            placeholder={t('explore.searchPlaceholder')}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            className="filters-toggle"
+            aria-expanded={showFilters}
+            aria-controls="explore-filters"
+            onClick={() => setShowFilters((value) => !value)}
+          >
+            <SlidersHorizontal aria-hidden="true" />
+            {t('explore.filters')}
+            {activeFilters > 0 && (
+              <span className="pill-count">{activeFilters}</span>
+            )}
+          </Button>
+        </form>
+      </search>
+      <fieldset
+        id="explore-filters"
+        className={`filter-panel ${showFilters ? 'open' : ''}`}
+      >
+        <legend className="sr-only">{t('explore.filters')}</legend>
+        <Field label={t('fields.category')}>
+          <select
+            value={filters.category}
+            onChange={(event) =>
+              update('category', event.target.value as CategoryCode | '')
+            }
+          >
+            <option value="">{t('explore.allCategories')}</option>
+            {catalogService.categories.map((code) => (
+              <option key={code} value={code}>
+                {t(`categories.${code}`)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={t('fields.university')}>
+          <select
+            value={filters.universityId}
+            onChange={(event) => update('universityId', event.target.value)}
+          >
+            <option value="">{t('explore.allUniversities')}</option>
+            {catalogService.universities.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.shortName}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={t('fields.campus')}>
+          <select
+            value={filters.campus}
+            onChange={(event) => update('campus', event.target.value)}
+          >
+            <option value="">{t('explore.allCampuses')}</option>
+            {campuses.map((campus) => (
+              <option key={campus} value={campus}>
+                {campus}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={t('fields.district')}>
+          <input
+            value={filters.location}
+            onChange={(event) => update('location', event.target.value)}
+            placeholder={t('explore.districtPlaceholder')}
+          />
+        </Field>
+        <Field label={t('fields.from')}>
+          <input
+            type="datetime-local"
+            value={filters.from}
+            onChange={(event) => update('from', event.target.value)}
+          />
+        </Field>
+        <Field
+          label={t('fields.to')}
+          error={invalidPeriod ? t('validation.endAfterStart') : undefined}
         >
-          <option value="">Todas las universidades</option>
-          {['UPC', 'PUCP', 'UNI', 'UNMSM'].map((value) => (
-            <option key={value}>{value}</option>
-          ))}
-        </select>
-        <select
-          aria-label="Campus"
-          value={filters.campus}
-          onChange={(event) => update('campus', event.target.value)}
-        >
-          <option value="">Todos los campus</option>
-          {Array.from(new Set(data.map((item) => item.campus))).map((value) => (
-            <option key={value}>{value}</option>
-          ))}
-        </select>
-        <input
-          aria-label="Ubicación"
-          value={filters.location}
-          onChange={(event) => update('location', event.target.value)}
-          placeholder="Distrito"
-        />
-        <input
-          type="date"
-          aria-label="Fecha"
-          value={filters.date}
-          onChange={(event) => update('date', event.target.value)}
-        />
-        <input
-          type="time"
-          aria-label="Hora"
-          value={filters.time}
-          onChange={(event) => update('time', event.target.value)}
-        />
-        <Button type="button" variant="outline" onClick={clear}>
-          Limpiar filtros
-        </Button>
-        <output className="result-count">{filtered.length} objetos</output>
-      </div>
+          <input
+            type="datetime-local"
+            value={filters.to}
+            min={filters.from || undefined}
+            onChange={(event) => update('to', event.target.value)}
+          />
+        </Field>
+        <div className="filter-actions">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={locate}
+            aria-pressed={Boolean(origin)}
+          >
+            <LocateFixed aria-hidden="true" />
+            {origin ? t('explore.sortedByDistance') : t('explore.nearMe')}
+          </Button>
+          <Button type="button" variant="ghost" onClick={clear}>
+            {t('explore.clear')}
+          </Button>
+        </div>
+        {locationError && <p className="field-error">{locationError}</p>}
+        {origin && (
+          <p className="muted small">{t('explore.locationPrivacy')}</p>
+        )}
+      </fieldset>
+      <output className="result-count">
+        {t('explore.results', { count: results.length })}
+      </output>
       {isLoading ? (
         <LoadingSkeleton />
       ) : isError ? (
         <ErrorState onRetry={() => refetch()} />
-      ) : filtered.length ? (
+      ) : results.length ? (
         <div className="listing-grid">
-          {filtered.map((item) => (
+          {results.map(({ listing, distance }) => (
             <ListingCard
-              key={item.id}
-              listing={item}
-              owner={state.users.find((user) => user.id === item.ownerId)}
+              key={listing.id}
+              listing={listing}
+              owner={userById(state, listing.ownerId)}
+              ownerReputation={reputationOf(state, listing.ownerId)}
+              own={listing.ownerId === state.currentUserId}
+              distanceKm={distance}
             />
           ))}
         </div>
       ) : (
         <EmptyState
-          title="No encontramos coincidencias"
-          description="Prueba con otra fecha, campus o palabra clave."
-          action="Limpiar filtros"
+          icon={Search}
+          title={t('explore.emptyTitle')}
+          description={t('explore.emptyDescription')}
+          action={t('explore.clear')}
           onAction={clear}
         />
       )}
@@ -225,153 +316,205 @@ export function ExplorePage() {
 }
 
 export function ObjectDetailPage() {
+  const { t, formatMoney, formatDateTime } = useI18n();
   const { id } = useParams();
   const { state } = useDemo();
   const [open, setOpen] = useState(false);
+  const [activeImage, setActiveImage] = useState(0);
+  const { guard, dialog } = useOperationGate();
   const item = state.listings.find((candidate) => candidate.id === id);
-  const owner = state.users.find((user) => user.id === item?.ownerId);
   if (!item)
     return (
-      <EmptyState
-        title="Objeto no encontrado"
-        description="La publicación ya no está disponible."
-        action="Volver a explorar"
-        href="/explore"
+      <NotFound
+        title={t('listing.notFound.title')}
+        description={t('listing.notFound.description')}
       />
     );
+  const owner = userById(state, item.ownerId);
+  const reputation = reputationOf(state, item.ownerId);
+  const own = item.ownerId === state.currentUserId;
+  const photos = item.media.filter((media) => media.type === 'PHOTO');
+  const gallery = photos.length
+    ? photos
+    : [
+        {
+          id: 'cover',
+          type: 'PHOTO' as const,
+          url: item.image,
+          name: item.title,
+        },
+      ];
+  const upcoming = item.availabilitySlots
+    .filter(
+      (slot) =>
+        slot.status === 'AVAILABLE' && new Date(slot.endAt) > new Date(),
+    )
+    .sort((a, b) => a.startAt.localeCompare(b.startAt));
+  const reserved = item.availabilitySlots.filter(
+    (slot) => slot.status === 'RESERVED' && new Date(slot.endAt) > new Date(),
+  );
+  const university = findUniversity(item.universityId);
+
   return (
     <>
       <Link className="back-link" to="/explore">
-        <ArrowLeft />
-        Volver a explorar
+        <ArrowLeft aria-hidden="true" />
+        {t('listing.backToExplore')}
       </Link>
       <div className="object-layout">
-        <section className="object-gallery">
-          <img src={item.image} alt={item.title} />
-          <div>
-            {item.media.slice(1, 3).map((media) => (
-              <img key={media.id} src={media.url} alt={media.name} />
-            ))}
-            {item.media.length < 2 && (
-              <div className="gallery-placeholder">
-                <Camera />
-                <span>Vista principal</span>
-              </div>
-            )}
-          </div>
+        <section className="object-gallery" aria-label={t('listing.gallery')}>
+          <img
+            src={gallery[activeImage]?.url}
+            alt={gallery[activeImage]?.name ?? item.title}
+          />
+          {gallery.length > 1 && (
+            <div className="gallery-thumbs">
+              {gallery.map((media, index) => (
+                <button
+                  type="button"
+                  key={media.id}
+                  aria-label={t('listing.showImage', { index: index + 1 })}
+                  aria-pressed={index === activeImage}
+                  onClick={() => setActiveImage(index)}
+                >
+                  <img src={media.url} alt="" />
+                </button>
+              ))}
+            </div>
+          )}
         </section>
-        <aside className="object-summary">
+        <aside className="object-summary panel">
           <div className="listing-meta">
-            <span>{item.category}</span>
-            <StatusBadge status={item.status} />
+            <span>{t(`categories.${item.category}`)}</span>
+            <StatusBadge kind="listing" status={item.status} />
           </div>
           <h1>{item.title}</h1>
-          <div className="object-location">
-            <MapPin />
-            {item.campus} · {item.location}
-          </div>
-          <p>{item.description}</p>
-          <p>
-            <strong>Condición:</strong> {item.condition}
+          <p className="muted">
+            {university?.shortName} · {item.campus} · {item.location}
           </p>
+          <p>{item.description}</p>
+          <DefinitionList
+            items={[[t('fields.condition'), t(`conditions.${item.condition}`)]]}
+          />
           <div className="price-block">
-            <strong>{money(item.dailyRate)}</strong>
-            <span>por día</span>
-            <small>Garantía reembolsable: {money(item.guaranteeAmount)}</small>
+            <strong>{formatMoney(item.dailyRate)}</strong>
+            <span>{t('listing.perDay')}</span>
+            <small>
+              {item.guaranteeAmount > 0
+                ? t('listing.guaranteeRequired', {
+                    amount: formatMoney(item.guaranteeAmount),
+                  })
+                : t('listing.noGuarantee')}
+            </small>
           </div>
-          <Button
-            size="lg"
-            onClick={() => setOpen(true)}
-            disabled={
-              item.ownerId === state.currentUserId || item.status !== 'ACTIVE'
-            }
-          >
-            Solicitar préstamo <ArrowRight />
-          </Button>
-          {item.ownerId === state.currentUserId && (
-            <p className="own-listing-note">
-              Este objeto te pertenece. Adminístralo desde Mis objetos.
-            </p>
+          {own ? (
+            <div className="own-listing-note">
+              <p>{t('listing.ownNotice')}</p>
+              <Button
+                variant="outline"
+                render={<Link to={`/my-items/${item.id}/edit`} />}
+              >
+                <Edit3 aria-hidden="true" />
+                {t('myItems.edit')}
+              </Button>
+            </div>
+          ) : (
+            <Button
+              size="lg"
+              onClick={() => guard(() => setOpen(true))}
+              disabled={item.status !== 'ACTIVE'}
+            >
+              {t('listing.request')}
+              <ArrowRight aria-hidden="true" />
+            </Button>
+          )}
+          {item.status !== 'ACTIVE' && !own && (
+            <p className="muted small">{t('listing.notRequestable')}</p>
           )}
         </aside>
       </div>
       <div className="detail-grid">
         <section className="panel">
-          <span className="eyebrow">Disponibilidad</span>
-          <h2>Intervalos disponibles</h2>
-          <div className="availability-days">
-            {item.availabilitySlots
-              .filter((slot) => slot.status === 'AVAILABLE')
-              .slice(0, 6)
-              .map((slot) => (
-                <span key={slot.id}>
-                  <Check />
-                  {shortDate(slot.startAt)} – {shortDate(slot.endAt)}
-                </span>
+          <p className="eyebrow">{t('listing.availability')}</p>
+          <h2>{t('listing.availableWindows')}</h2>
+          {upcoming.length ? (
+            <ul className="slot-chips">
+              {upcoming.slice(0, 6).map((slot) => (
+                <li key={slot.id}>
+                  <Check aria-hidden="true" />
+                  {formatDateTime(slot.startAt)} – {formatDateTime(slot.endAt)}
+                </li>
               ))}
-          </div>
-          {!item.availabilitySlots.some(
-            (slot) => slot.status === 'AVAILABLE',
-          ) && <p>No hay intervalos disponibles.</p>}
-          <p className="muted">
-            Los periodos reservados permanecen bloqueados.
-          </p>
+            </ul>
+          ) : (
+            <p className="muted">{t('listing.noAvailability')}</p>
+          )}
+          {reserved.length > 0 && (
+            <>
+              <h3 className="subheading">{t('listing.blockedWindows')}</h3>
+              <ul className="slot-chips blocked">
+                {reserved.map((slot) => (
+                  <li key={slot.id}>
+                    <X aria-hidden="true" />
+                    {formatDateTime(slot.startAt)} –{' '}
+                    {formatDateTime(slot.endAt)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </section>
         <section className="panel">
-          <span className="eyebrow">Punto de intercambio</span>
-          <h2>{item.exchangePlace}</h2>
-          <p className="muted">
-            El teléfono de la contraparte se comparte únicamente durante una
-            reserva o préstamo vigente.
-          </p>
+          <p className="eyebrow">{t('listing.exchangePoint')}</p>
+          <MapPreview
+            place={item.exchangePlace}
+            coordinates={campusCoordinates(item.universityId, item.campus)}
+          />
+          <p className="muted small">{t('listing.phonePrivacy')}</p>
         </section>
         <section className="panel conditions-panel">
-          <span className="eyebrow">Condiciones actuales</span>
-          <h2>Acuerdos claros antes de solicitar</h2>
-          <dl>
-            <div>
-              <dt>Uso</dt>
-              <dd>{item.terms.usage}</dd>
-            </div>
-            <div>
-              <dt>Entrega</dt>
-              <dd>{item.terms.delivery}</dd>
-            </div>
-            <div>
-              <dt>Devolución</dt>
-              <dd>{item.terms.returnPolicy}</dd>
-            </div>
-            <div>
-              <dt>Cancelación</dt>
-              <dd>{item.terms.cancellation}</dd>
-            </div>
-          </dl>
+          <p className="eyebrow">{t('listing.conditions')}</p>
+          <h2>{t('listing.conditionsTitle')}</h2>
+          <DefinitionList
+            items={[
+              [t('fields.usage'), item.terms.usage],
+              [t('fields.delivery'), item.terms.delivery],
+              [t('fields.returnPolicy'), item.terms.returnPolicy],
+              [t('fields.cancellation'), item.terms.cancellation],
+            ]}
+          />
         </section>
         <section className="panel owner-panel">
-          <span className="eyebrow">Prestamista</span>
-          <UserChip user={owner} detail />
+          <p className="eyebrow">{t('roles.LENDER')}</p>
+          <UserChip
+            user={owner}
+            detail={
+              owner
+                ? `${findUniversity(owner.universityId)?.shortName} · ${owner.campus}`
+                : undefined
+            }
+          />
           <div className="owner-stats">
+            <Reputation value={reputation.average} count={reputation.count} />
             <span>
-              <Reputation
-                value={owner?.rating ?? 0}
-                count={owner?.ratingCount}
-              />{' '}
-              valoración
-            </span>
-            <span>
-              <ShieldCheck />
-              Identidad verificada
+              <ShieldCheck aria-hidden="true" />
+              {owner?.verified
+                ? t('profile.verified')
+                : t('profile.notVerified')}
             </span>
           </div>
           <Button
             variant="outline"
-            render={<Link to={`/users/${owner?.id}`} />}
+            render={<Link to={`/users/${item.ownerId}`} />}
           >
-            Ver perfil y comentarios
+            {t('listing.viewProfile')}
           </Button>
         </section>
       </div>
-      <RequestDialog listingId={item.id} open={open} onOpenChange={setOpen} />
+      {!own && (
+        <RequestDialog listingId={item.id} open={open} onOpenChange={setOpen} />
+      )}
+      {dialog}
     </>
   );
 }
@@ -385,145 +528,146 @@ function RequestDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useI18n();
   const { state, createRequest } = useDemo();
   const navigate = useNavigate();
-  const item = state.listings.find((listing) => listing.id === listingId)!;
-  const toLocalInput = (date: Date) =>
-    new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-      .toISOString()
-      .slice(0, 16);
-  const initialStart = new Date(Date.now() + 86_400_000);
-  const [startAt, setStartAt] = useState(toLocalInput(initialStart));
+  const item = state.listings.find((listing) => listing.id === listingId);
+  const firstWindow = item?.availabilitySlots.find(
+    (slot) =>
+      slot.status === 'AVAILABLE' &&
+      new Date(slot.endAt) > new Date(Date.now() + 86_400_000),
+  );
+  const defaultStart = new Date(
+    Math.max(
+      Date.now() + 86_400_000,
+      firstWindow ? new Date(firstWindow.startAt).getTime() : 0,
+    ),
+  );
+  defaultStart.setMinutes(0, 0, 0);
+  const [startAt, setStartAt] = useState(toZonedInput(defaultStart));
   const [endAt, setEndAt] = useState(
-    toLocalInput(new Date(initialStart.getTime() + 2 * 86_400_000)),
+    toZonedInput(new Date(defaultStart.getTime() + 2 * 86_400_000)),
   );
+  const [message, setMessage] = useState('');
   const [accepted, setAccepted] = useState(false);
-  const [error, setError] = useState('');
-  const available = Boolean(
-    startAt &&
-    endAt &&
-    new Date(endAt) > new Date(startAt) &&
-    isPeriodAvailable(item.availabilitySlots, startAt, endAt),
+  const [result, setResult] = useState<ActionResult | null>(null);
+  if (!item) return null;
+  const startIso = fromZonedInput(startAt);
+  const endIso = fromZonedInput(endAt);
+  const validRange = Boolean(
+    startIso && endIso && new Date(endIso) > new Date(startIso),
   );
-  const breakdown = economicBreakdown({
-    dailyRate: item.dailyRate,
-    guaranteeAmount: item.guaranteeAmount,
-    startAt,
-    endAt,
-  });
+  const future = Boolean(startIso && new Date(startIso) > new Date());
+  const available =
+    validRange &&
+    future &&
+    isPeriodAvailable(item.availabilitySlots, startIso, endIso);
+  const breakdown = validRange ? quoteListing(item, startIso, endIso) : null;
+  const availabilityMessage = !validRange
+    ? t('validation.endAfterStart')
+    : !future
+      ? t('results.request.pastStart')
+      : available
+        ? t('request.periodAvailable')
+        : t('results.request.periodUnavailable');
+
   const submit = () => {
-    if (!state.termsAccepted) {
+    const outcome = createRequest(item.id, startIso, endIso, message);
+    setResult(outcome);
+    if (outcome.ok) {
       onOpenChange(false);
-      navigate('/terms');
-      return;
+      navigate('/requests', { state: { created: true } });
     }
-    if (!accepted) {
-      setError('Debes leer y aceptar las condiciones.');
-      return;
-    }
-    const result = createRequest(
-      item.id,
-      new Date(startAt).toISOString(),
-      new Date(endAt).toISOString(),
-    );
-    if (!result.ok) {
-      setError(result.message ?? 'No se pudo crear la solicitud.');
-      return;
-    }
-    onOpenChange(false);
-    navigate('/requests');
   };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="request-dialog">
+      <DialogContent className="app-dialog wide" closeLabel={t('common.close')}>
         <DialogHeader>
-          <DialogTitle>Revisa antes de solicitar</DialogTitle>
-          <DialogDescription>Solicitud para {item.title}</DialogDescription>
+          <DialogTitle>{t('request.dialogTitle')}</DialogTitle>
+          <DialogDescription>
+            {t('request.dialogDescription', { title: item.title })}
+          </DialogDescription>
         </DialogHeader>
-        <div className="date-fields">
-          <label>
-            Desde
-            <input
-              type="datetime-local"
-              value={startAt}
-              onChange={(event) => setStartAt(event.target.value)}
+        <div className="dialog-body">
+          <div className="date-fields">
+            <Field label={t('fields.from')}>
+              <input
+                type="datetime-local"
+                value={startAt}
+                onChange={(event) => setStartAt(event.target.value)}
+              />
+            </Field>
+            <Field label={t('fields.to')}>
+              <input
+                type="datetime-local"
+                value={endAt}
+                min={startAt}
+                onChange={(event) => setEndAt(event.target.value)}
+              />
+            </Field>
+          </div>
+          <output
+            className={
+              available ? 'inline-status success' : 'inline-status warning'
+            }
+          >
+            {available ? (
+              <CheckCircle2 aria-hidden="true" />
+            ) : (
+              <TriangleAlert aria-hidden="true" />
+            )}
+            {availabilityMessage}
+          </output>
+          <div className="terms-review">
+            <h3>{t('request.reviewTitle')}</h3>
+            <DefinitionList
+              items={[
+                [t('fields.usage'), item.terms.usage],
+                [t('fields.delivery'), item.terms.delivery],
+                [t('fields.returnPolicy'), item.terms.returnPolicy],
+                [t('fields.cancellation'), item.terms.cancellation],
+                [t('fields.exchangePlace'), item.exchangePlace],
+              ]}
             />
-          </label>
-          <label>
-            Hasta
-            <input
-              type="datetime-local"
-              value={endAt}
-              onChange={(event) => setEndAt(event.target.value)}
+          </div>
+          {breakdown && <EconomicSummary breakdown={breakdown} />}
+          <p className="muted small">{t('request.paymentLater')}</p>
+          <Field
+            label={t('request.messageLabel')}
+            hint={t('request.messageHint')}
+          >
+            <textarea
+              rows={2}
+              maxLength={280}
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
             />
+          </Field>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={accepted}
+              onChange={(event) => setAccepted(event.target.checked)}
+            />
+            {t('request.acceptConditions')}
           </label>
+          <Feedback result={result && !result.ok ? result : null} />
         </div>
-        <div className={available ? 'success-box' : 'warning-box'}>
-          <CheckCircle2 />
-          <p>
-            {available
-              ? 'El periodo está disponible.'
-              : 'Elige un periodo válido y disponible.'}
-          </p>
-        </div>
-        <div className="terms-review">
-          <p>
-            <strong>Uso:</strong> {item.terms.usage}
-          </p>
-          <p>
-            <strong>Entrega:</strong> {item.terms.delivery}
-          </p>
-          <p>
-            <strong>Devolución:</strong> {item.terms.returnPolicy}
-          </p>
-          <p>
-            <strong>Cancelación:</strong> {item.terms.cancellation}
-          </p>
-          <p>
-            <strong>Lugar:</strong> {item.exchangePlace}
-          </p>
-        </div>
-        <div className="economic-summary">
-          <div>
-            <span>Tarifa · {breakdown.days} días</span>
-            <strong>{money(breakdown.fee)}</strong>
-          </div>
-          <div>
-            <span>Comisión</span>
-            <strong>{money(breakdown.serviceFee)}</strong>
-          </div>
-          <div>
-            <span>Garantía</span>
-            <strong>{money(breakdown.guarantee)}</strong>
-          </div>
-          <div className="total">
-            <span>Total</span>
-            <strong>{money(breakdown.total)}</strong>
-          </div>
-        </div>
-        <label className="check-row">
-          <input
-            type="checkbox"
-            checked={accepted}
-            onChange={(event) => setAccepted(event.target.checked)}
-          />
-          He leído y acepto las condiciones.
-        </label>
-        {error && (
-          <p className="field-error" role="alert">
-            {error}
-          </p>
-        )}
         <DialogFooter>
           <Button
             type="button"
             variant="outline"
             onClick={() => onOpenChange(false)}
           >
-            Cancelar
+            {t('common.cancel')}
           </Button>
-          <Button type="button" disabled={!available} onClick={submit}>
-            Enviar solicitud
+          <Button
+            type="button"
+            disabled={!available || !accepted}
+            onClick={submit}
+          >
+            {t('request.submit')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -532,215 +676,298 @@ function RequestDialog({
 }
 
 export function MyItemsPage() {
-  const { state, toggleListing, archiveListing } = useDemo();
+  const { t, formatMoney } = useI18n();
+  const { state, setListingStatus } = useDemo();
+  const [archiveId, setArchiveId] = useState<string | null>(null);
+  const [result, setResult] = useState<ActionResult | null>(null);
   const items = state.listings.filter(
     (item) => item.ownerId === state.currentUserId,
   );
+  const archiveTarget = items.find((item) => item.id === archiveId);
+  const change = (id: string, status: ListingStatus) =>
+    setResult(setListingStatus(id, status));
+
   return (
     <>
       <PageHeader
-        eyebrow="Como prestamista"
-        title="Mis objetos"
-        description="Publicaciones, disponibilidad y próximas reservas."
+        eyebrow={t('myItems.eyebrow')}
+        title={t('myItems.title')}
+        description={t('myItems.description')}
         action={
           <Button render={<Link to="/my-items/new" />}>
-            <Plus />
-            Publicar objeto
+            <Plus aria-hidden="true" />
+            {t('myItems.publish')}
           </Button>
         }
       />
+      <Feedback result={result} />
       {items.length ? (
-        <div className="my-items-list">
-          {items.map((item) => (
-            <article className="my-item-card" key={item.id}>
-              <img src={item.image} alt={item.title} />
-              <div className="my-item-main">
-                <div>
-                  <StatusBadge status={item.status} />
-                  <h2>{item.title}</h2>
-                  <p>
-                    {item.category} · {item.campus}
+        <ul className="my-items-list">
+          {items.map((item) => {
+            const pending = pendingRequestsFor(state, item);
+            const upcoming = state.reservations.filter(
+              (reservation) =>
+                reservation.listingId === item.id &&
+                reservation.status === 'CONFIRMED',
+            ).length;
+            return (
+              <li className="my-item-card panel" key={item.id}>
+                <img src={item.image} alt="" />
+                <div className="my-item-main">
+                  <StatusBadge kind="listing" status={item.status} />
+                  <h2>
+                    <Link to={`/objects/${item.id}`}>{item.title}</Link>
+                  </h2>
+                  <p className="muted">
+                    {t(`categories.${item.category}`)} · {item.campus}
                   </p>
+                  <dl className="my-item-numbers">
+                    <div>
+                      <dt>{t('fields.dailyRate')}</dt>
+                      <dd>{formatMoney(item.dailyRate)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('fields.guarantee')}</dt>
+                      <dd>
+                        {item.guaranteeAmount > 0
+                          ? formatMoney(item.guaranteeAmount)
+                          : t('listing.noGuaranteeShort')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('myItems.pendingRequests')}</dt>
+                      <dd>{pending}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('myItems.upcomingReservations')}</dt>
+                      <dd>{upcoming}</dd>
+                    </div>
+                  </dl>
                 </div>
-                <div className="my-item-numbers">
-                  <span>
-                    <small>Tarifa</small>
-                    <strong>{money(item.dailyRate)}/día</strong>
-                  </span>
-                  <span>
-                    <small>Garantía</small>
-                    <strong>{money(item.guaranteeAmount)}</strong>
-                  </span>
-                  <span>
-                    <small>Solicitudes</small>
-                    <strong>
-                      {
-                        state.requests.filter(
-                          (request) =>
-                            request.listingId === item.id &&
-                            request.status === 'PENDING',
-                        ).length
-                      }
-                    </strong>
-                  </span>
+                <div className="item-actions">
+                  {item.status !== 'ARCHIVED' && (
+                    <>
+                      <Button
+                        variant="outline"
+                        render={<Link to={`/my-items/${item.id}/edit`} />}
+                      >
+                        <Edit3 aria-hidden="true" />
+                        {t('myItems.edit')}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        render={
+                          <Link to={`/my-items/${item.id}/availability`} />
+                        }
+                      >
+                        <CalendarDays aria-hidden="true" />
+                        {t('myItems.availability')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() =>
+                          change(
+                            item.id,
+                            item.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE',
+                          )
+                        }
+                      >
+                        {item.status === 'ACTIVE' ? (
+                          <Pause aria-hidden="true" />
+                        ) : (
+                          <Play aria-hidden="true" />
+                        )}
+                        {item.status === 'ACTIVE'
+                          ? t('myItems.pause')
+                          : t('myItems.reactivate')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="danger-text"
+                        onClick={() => setArchiveId(item.id)}
+                      >
+                        <Trash2 aria-hidden="true" />
+                        {t('myItems.archive')}
+                      </Button>
+                    </>
+                  )}
+                  {pending > 0 && (
+                    <Button render={<Link to="/requests?tab=received" />}>
+                      {t('myItems.reviewRequests')}
+                    </Button>
+                  )}
                 </div>
-              </div>
-              <div className="item-actions">
-                <Button
-                  variant="outline"
-                  render={<Link to={`/my-items/${item.id}/edit`} />}
-                >
-                  <Edit3 />
-                  Editar
-                </Button>
-                <Button
-                  variant="outline"
-                  render={<Link to={`/my-items/${item.id}/availability`} />}
-                >
-                  <CalendarDays />
-                  Disponibilidad
-                </Button>
-                {item.status !== 'ARCHIVED' && (
-                  <Button
-                    variant="ghost"
-                    onClick={() => toggleListing(item.id)}
-                  >
-                    <Pause />
-                    {item.status === 'ACTIVE' ? 'Pausar' : 'Reactivar'}
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  onClick={() => archiveListing(item.id)}
-                  disabled={item.status === 'ARCHIVED'}
-                >
-                  <Trash2 />
-                  Archivar
-                </Button>
-              </div>
-            </article>
-          ))}
-        </div>
+              </li>
+            );
+          })}
+        </ul>
       ) : (
         <EmptyState
-          title="No tienes objetos publicados"
-          description="Publica tu primer objeto para empezar a recibir solicitudes."
-          action="Publicar mi primer objeto"
+          title={t('myItems.emptyTitle')}
+          description={t('myItems.emptyDescription')}
+          action={t('myItems.publishFirst')}
           href="/my-items/new"
         />
       )}
+      <ConfirmDialog
+        open={Boolean(archiveTarget)}
+        onOpenChange={(open) => !open && setArchiveId(null)}
+        title={t('myItems.archiveTitle')}
+        description={t('myItems.archiveDescription', {
+          title: archiveTarget?.title ?? '',
+        })}
+        confirmLabel={t('myItems.archiveConfirm')}
+        destructive
+        onConfirm={() => {
+          if (archiveTarget) change(archiveTarget.id, 'ARCHIVED');
+          setArchiveId(null);
+        }}
+      />
     </>
   );
 }
 
-const listingSchema = z.object({
-  title: z.string().min(4, 'Ingresa un título'),
-  category: z.string().min(1),
-  description: z.string().min(20, 'Describe el objeto con más detalle'),
-  condition: z.string().min(1),
-  university: z.string().min(2),
-  campus: z.string().min(2),
-  location: z.string().min(2),
-  exchangePlace: z.string().min(5),
-  usage: z.string().min(5),
-  delivery: z.string().min(5),
-  returnPolicy: z.string().min(5),
-  cancellation: z.string().min(5),
-  dailyRate: z.number().min(0),
-  guaranteeAmount: z.number().min(0),
-});
-type ListingValues = z.infer<typeof listingSchema>;
 export function ListingFormPage({ edit = false }: { edit?: boolean }) {
+  const { t, formatNumber } = useI18n();
   const { id } = useParams();
-  const { state, addListing, updateListing } = useDemo();
+  const { state, createListing, updateListing } = useDemo();
   const navigate = useNavigate();
+  const { guard, dialog } = useOperationGate();
+  const user = currentUserOf(state);
   const existing = state.listings.find((item) => item.id === id);
   const [media, setMedia] = useState<ListingMedia[]>(existing?.media ?? []);
-  const [fileError, setFileError] = useState('');
+  const [mediaError, setMediaError] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const schema = useMemo(
+    () =>
+      z.object({
+        title: z
+          .string()
+          .trim()
+          .min(5, t('validation.min', { count: 5 }))
+          .max(80, t('validation.max', { count: 80 })),
+        category: z.string().min(1, t('validation.select')),
+        description: z
+          .string()
+          .trim()
+          .min(20, t('validation.min', { count: 20 })),
+        condition: z.string().min(1, t('validation.select')),
+        universityId: z.string().min(1, t('validation.select')),
+        campus: z.string().min(1, t('validation.select')),
+        location: z.string().trim().min(2, t('validation.required')),
+        exchangePlace: z
+          .string()
+          .trim()
+          .min(5, t('validation.min', { count: 5 })),
+        usage: z
+          .string()
+          .trim()
+          .min(10, t('validation.min', { count: 10 })),
+        delivery: z
+          .string()
+          .trim()
+          .min(10, t('validation.min', { count: 10 })),
+        returnPolicy: z
+          .string()
+          .trim()
+          .min(10, t('validation.min', { count: 10 })),
+        cancellation: z
+          .string()
+          .trim()
+          .min(10, t('validation.min', { count: 10 })),
+        dailyRate: z
+          .number({ error: t('validation.number') })
+          .gt(0, t('validation.dailyRate')),
+        guaranteeAmount: z
+          .number({ error: t('validation.number') })
+          .min(0, t('validation.nonNegative')),
+      }),
+    [t],
+  );
+  type Values = z.infer<typeof schema>;
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
-  } = useForm<ListingValues>({
-    resolver: zodResolver(listingSchema),
+    watch,
+    setValue,
+    formState: { errors, isSubmitting, submitCount },
+  } = useForm<Values>({
+    resolver: zodResolver(schema),
     defaultValues: existing
       ? { ...existing, ...existing.terms }
       : {
-          category: 'Calculadoras',
-          condition: 'Muy buena',
-          university:
-            state.users.find((u) => u.id === state.currentUserId)?.university ??
-            'UPC',
-          campus:
-            state.users.find((u) => u.id === state.currentUserId)?.campus ?? '',
-          usage: 'Uso académico responsable.',
-          delivery: 'Entrega presencial con revisión conjunta.',
-          returnPolicy: 'Devolver en el mismo estado.',
-          cancellation:
-            'Cancelación permitida antes de confirmar la recepción.',
-          dailyRate: 10,
-          guaranteeAmount: 80,
+          category: '',
+          condition: '',
+          universityId: user?.universityId ?? '',
+          campus: user?.campus ?? '',
+          location:
+            findUniversity(user?.universityId ?? '')?.campuses.find(
+              (c) => c.name === user?.campus,
+            )?.district ?? '',
+          usage: '',
+          delivery: '',
+          returnPolicy: '',
+          cancellation: '',
+          guaranteeAmount: 0,
         },
   });
+  const university = findUniversity(watch('universityId'));
   if (edit && !existing)
     return (
-      <EmptyState
-        title="Objeto no encontrado"
-        description="No puedes editar esta publicación."
-        href="/my-items"
-        action="Volver"
+      <NotFound
+        title={t('listing.notFound.title')}
+        description={t('listing.notFound.description')}
       />
     );
+
   const addMedia = async (files: FileList | null) => {
-    if (!files) return;
+    if (!files?.length) return;
+    setUploading(true);
     try {
-      const encoded = await filesToDataUrls(files);
+      const uploaded = await cloudinaryAdapter.uploadMany(files, ['image']);
       setMedia((current) => [
         ...current,
-        ...encoded.map(({ file, dataUrl }) => ({
-          id: `media-${Date.now()}-${file.name}`,
-          type: file.type.startsWith('video/')
-            ? ('VIDEO' as const)
-            : ('PHOTO' as const),
-          url: dataUrl,
-          name: file.name,
+        ...uploaded.map((item) => ({
+          id: item.publicId,
+          type: 'PHOTO' as const,
+          url: item.url,
+          name: item.name,
         })),
       ]);
-      setFileError('');
-    } catch (error) {
-      setFileError(
-        error instanceof Error ? error.message : 'No se pudo leer la imagen.',
+      setMediaError('');
+    } catch (reason) {
+      setMediaError(
+        reason instanceof UploadError
+          ? t(`uploads.errors.${reason.code}`, {
+              name: reason.fileName,
+              size: formatNumber(cloudinaryAdapter.maxBytes / 1_000_000),
+            })
+          : t('uploads.errors.READ_ERROR', { name: '' }),
       );
+    } finally {
+      setUploading(false);
     }
   };
-  const submit = (values: ListingValues) => {
-    const image =
-      media.find((item) => item.type === 'PHOTO')?.url ??
-      existing?.image ??
-      '/images/calculator.webp';
+
+  const submit = (values: Values) => {
+    if (!media.length) {
+      setMediaError(t('validation.photoRequired'));
+      return;
+    }
     const payload = {
       title: values.title,
-      category: values.category,
+      category: values.category as CategoryCode,
       description: values.description,
-      condition: values.condition,
-      university: values.university,
+      condition: values.condition as ConditionCode,
+      universityId: values.universityId,
       campus: values.campus,
       location: values.location,
       exchangePlace: values.exchangePlace,
       dailyRate: values.dailyRate,
       guaranteeAmount: values.guaranteeAmount,
-      image,
-      media: media.length
-        ? media
-        : [
-            {
-              id: `media-${Date.now()}`,
-              type: 'PHOTO' as const,
-              url: image,
-              name: values.title,
-            },
-          ],
-      availability: existing?.availability ?? [],
+      image: media[0].url,
+      media,
       availabilitySlots: existing?.availabilitySlots ?? [],
       terms: {
         usage: values.usage,
@@ -750,86 +977,167 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
       },
     };
     if (existing) {
-      updateListing(existing.id, payload);
-      navigate('/my-items');
-    } else {
-      const newId = addListing(payload);
-      navigate(`/my-items/${newId}/availability`);
+      const outcome = updateListing(existing.id, payload);
+      setResult(outcome);
+      if (outcome.ok) navigate('/my-items');
+      return;
     }
+    guard(() => {
+      const outcome = createListing(payload);
+      setResult(outcome);
+      if (outcome.ok && outcome.id)
+        navigate(`/my-items/${outcome.id}/availability?new=1`);
+    });
   };
+
+  const text = (
+    name: keyof Values,
+    label: string,
+    options: { wide?: boolean; hint?: string; rows?: number } = {},
+  ) => (
+    <Field
+      label={label}
+      error={errors[name]?.message}
+      hint={options.hint}
+      wide={options.wide}
+      required
+    >
+      {options.rows ? (
+        <textarea rows={options.rows} {...register(name)} />
+      ) : (
+        <input {...register(name)} />
+      )}
+    </Field>
+  );
+
   return (
     <>
       <PageHeader
-        eyebrow={edit ? 'Administrar publicación' : 'Nueva publicación'}
-        title={edit ? `Editar ${existing?.title}` : 'Publicar un objeto'}
-        description="Completa la información, fotos, condiciones y economía."
+        eyebrow={
+          edit ? t('listingForm.editEyebrow') : t('listingForm.newEyebrow')
+        }
+        title={
+          edit
+            ? t('listingForm.editTitle', { title: existing?.title ?? '' })
+            : t('listingForm.newTitle')
+        }
+        description={t('listingForm.description')}
       />
       {edit && (
-        <div className="info-banner">
-          <ShieldCheck />
-          <p>
-            <strong>Las reservas confirmadas no cambiarán.</strong> Las
-            condiciones congeladas permanecen inmutables.
-          </p>
+        <div className="app-banner info">
+          <ShieldCheck aria-hidden="true" />
+          <p>{t('listingForm.snapshotNotice')}</p>
         </div>
       )}
-      <form className="panel listing-form" onSubmit={handleSubmit(submit)}>
+      <form
+        className="panel listing-form"
+        onSubmit={handleSubmit(submit)}
+        noValidate
+      >
         <section>
-          <h2>Información y ubicación</h2>
+          <h2>{t('listingForm.sections.info')}</h2>
           <div className="field-grid">
-            <Field label="Título" error={errors.title?.message}>
-              <input {...register('title')} />
-            </Field>
-            <Field label="Categoría" error={errors.category?.message}>
+            {text('title', t('fields.title'), { wide: true })}
+            <Field
+              label={t('fields.category')}
+              error={errors.category?.message}
+              required
+            >
               <select {...register('category')}>
-                <option>Calculadoras</option>
-                <option>Cámaras</option>
-                <option>Libros</option>
-                <option>Herramientas</option>
-                <option>Electrónica</option>
+                <option value="">{t('common.selectOption')}</option>
+                {catalogService.categories.map((code) => (
+                  <option key={code} value={code}>
+                    {t(`categories.${code}`)}
+                  </option>
+                ))}
               </select>
             </Field>
-            <Field label="Descripción" error={errors.description?.message} wide>
-              <textarea rows={4} {...register('description')} />
-            </Field>
-            <Field label="Condición">
+            <Field
+              label={t('fields.condition')}
+              error={errors.condition?.message}
+              required
+            >
               <select {...register('condition')}>
-                <option>Excelente</option>
-                <option>Muy buena</option>
-                <option>Buena</option>
+                <option value="">{t('common.selectOption')}</option>
+                {catalogService.conditions.map((code) => (
+                  <option key={code} value={code}>
+                    {t(`conditions.${code}`)}
+                  </option>
+                ))}
               </select>
             </Field>
-            <Field label="Universidad">
-              <select {...register('university')}>
-                <option>UPC</option>
-                <option>PUCP</option>
-                <option>UNI</option>
-                <option>UNMSM</option>
-              </select>
-            </Field>
-            <Field label="Campus">
-              <input {...register('campus')} />
-            </Field>
-            <Field label="Distrito">
-              <input {...register('location')} />
-            </Field>
-            <Field label="Lugar de intercambio">
-              <input {...register('exchangePlace')} />
-            </Field>
+            {text('description', t('fields.description'), {
+              wide: true,
+              rows: 4,
+              hint: t('listingForm.descriptionHint'),
+            })}
           </div>
         </section>
         <section>
-          <h2>Fotografías</h2>
+          <h2>{t('listingForm.sections.location')}</h2>
+          <div className="field-grid">
+            <Field
+              label={t('fields.university')}
+              error={errors.universityId?.message}
+              required
+            >
+              <select
+                {...register('universityId', {
+                  onChange: () => setValue('campus', ''),
+                })}
+              >
+                <option value="">{t('common.selectOption')}</option>
+                {catalogService.universities.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.shortName}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field
+              label={t('fields.campus')}
+              error={errors.campus?.message}
+              required
+            >
+              <select
+                {...register('campus', {
+                  onChange: (event) =>
+                    setValue(
+                      'location',
+                      university?.campuses.find(
+                        (c) => c.name === event.target.value,
+                      )?.district ?? '',
+                    ),
+                })}
+                disabled={!university}
+              >
+                <option value="">{t('common.selectOption')}</option>
+                {university?.campuses.map((campus) => (
+                  <option key={campus.id} value={campus.name}>
+                    {campus.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {text('location', t('fields.district'))}
+            {text('exchangePlace', t('fields.exchangePlace'), {
+              hint: t('listingForm.exchangeHint'),
+            })}
+          </div>
+        </section>
+        <section>
+          <h2>{t('listingForm.sections.photos')}</h2>
           <label className="upload-zone" htmlFor="listing-media">
-            <ImagePlus />
-            <strong>Agrega fotos claras</strong>
+            <ImagePlus aria-hidden="true" />
+            <strong>{t('listingForm.photosTitle')}</strong>
             <span>
-              Incluye vistas generales, accesorios y cualquier detalle
-              relevante.
+              {t('listingForm.photosHint', {
+                size: formatNumber(cloudinaryAdapter.maxBytes / 1_000_000),
+              })}
             </span>
             <span className="button-like">
-              <Upload />
-              Seleccionar archivos
+              <Upload aria-hidden="true" />
+              {uploading ? t('uploads.uploading') : t('uploads.select')}
             </span>
           </label>
           <input
@@ -838,277 +1146,320 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
             type="file"
             accept="image/*"
             multiple
-            onChange={(event) => addMedia(event.target.files)}
+            onChange={(event) => {
+              addMedia(event.target.files);
+              event.target.value = '';
+            }}
           />
-          {fileError && (
+          {mediaError && (
             <p className="field-error" role="alert">
-              {fileError}
+              {mediaError}
             </p>
           )}
-          <div className="media-previews">
-            {media.map((item) => (
-              <article key={item.id}>
-                <img src={item.url} alt={item.name} />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Eliminar ${item.name}`}
-                  onClick={() =>
-                    setMedia((current) =>
-                      current.filter((candidate) => candidate.id !== item.id),
-                    )
-                  }
-                >
-                  <X />
-                </Button>
-              </article>
-            ))}
-          </div>
+          {media.length > 0 && (
+            <ul className="media-previews">
+              {media.map((item, index) => (
+                <li key={item.id}>
+                  <img src={item.url} alt={item.name} />
+                  {index === 0 && (
+                    <span className="cover-tag">{t('listingForm.cover')}</span>
+                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={t('evidence.remove', { name: item.name })}
+                    onClick={() =>
+                      setMedia((current) =>
+                        current.filter((candidate) => candidate.id !== item.id),
+                      )
+                    }
+                  >
+                    <X aria-hidden="true" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
         <section>
-          <h2>Condiciones</h2>
-          <div className="field-grid single">
-            <Field label="Condiciones de uso">
-              <textarea {...register('usage')} />
-            </Field>
-            <Field label="Condiciones de entrega">
-              <textarea {...register('delivery')} />
-            </Field>
-            <Field label="Condiciones de devolución">
-              <textarea {...register('returnPolicy')} />
-            </Field>
-            <Field label="Condiciones de cancelación">
-              <textarea {...register('cancellation')} />
-            </Field>
-          </div>
-        </section>
-        <section>
-          <h2>Economía</h2>
+          <h2>{t('listingForm.sections.conditions')}</h2>
+          <p className="muted small">{t('listingForm.conditionsHint')}</p>
           <div className="field-grid">
-            <Field label="Tarifa diaria (S/)" error={errors.dailyRate?.message}>
+            {text('usage', t('fields.usage'), { rows: 3 })}
+            {text('delivery', t('fields.delivery'), { rows: 3 })}
+            {text('returnPolicy', t('fields.returnPolicy'), { rows: 3 })}
+            {text('cancellation', t('fields.cancellation'), { rows: 3 })}
+          </div>
+        </section>
+        <section>
+          <h2>{t('listingForm.sections.economy')}</h2>
+          <div className="field-grid">
+            <Field
+              label={t('fields.dailyRateCurrency')}
+              error={errors.dailyRate?.message}
+              hint={t('listingForm.rateHint')}
+              required
+            >
               <input
                 type="number"
-                step="0.01"
+                inputMode="decimal"
+                step="0.5"
+                min="0.5"
                 {...register('dailyRate', { valueAsNumber: true })}
               />
             </Field>
             <Field
-              label="Garantía monetaria (S/)"
+              label={t('fields.guaranteeCurrency')}
               error={errors.guaranteeAmount?.message}
+              hint={t('listingForm.guaranteeHint')}
             >
               <input
                 type="number"
-                step="0.01"
+                inputMode="decimal"
+                step="1"
+                min="0"
                 {...register('guaranteeAmount', { valueAsNumber: true })}
               />
             </Field>
           </div>
         </section>
+        {submitCount > 0 && Object.keys(errors).length > 0 && (
+          <p className="field-error" role="alert">
+            {t('validation.reviewFields')}
+          </p>
+        )}
+        <Feedback result={result && !result.ok ? result : null} />
         <div className="form-footer">
           <Button
             type="button"
             variant="outline"
             onClick={() => navigate('/my-items')}
           >
-            Cancelar
+            {t('common.cancel')}
           </Button>
-          <Button type="submit" disabled={isSubmitting || !media.length}>
-            {edit ? 'Guardar cambios' : 'Guardar y definir disponibilidad'}
+          <Button type="submit" disabled={isSubmitting || uploading}>
+            {edit ? t('listingForm.save') : t('listingForm.publish')}
           </Button>
         </div>
       </form>
+      {dialog}
     </>
   );
 }
 
 export function AvailabilityPage() {
+  const { t, formatDateTime } = useI18n();
   const { id } = useParams();
+  const [params] = useSearchParams();
   const { state, saveAvailability } = useDemo();
   const item = state.listings.find((candidate) => candidate.id === id);
   const [slots, setSlots] = useState<AvailabilitySlot[]>(
     item?.availabilitySlots.filter((slot) => slot.status === 'AVAILABLE') ?? [],
   );
-  const future = new Date(Date.now() + 86_400_000);
-  const localValue = (date: Date) => {
-    const offset = date.getTimezoneOffset() * 60_000;
-    return new Date(date.getTime() - offset).toISOString().slice(0, 16);
-  };
-  const [startAt, setStartAt] = useState(localValue(future));
-  const [endAt, setEndAt] = useState(
-    localValue(new Date(future.getTime() + 3_600_000)),
+  const [startAt, setStartAt] = useState(() =>
+    toZonedInput(atZonedTime(addDays(today(), 1), 8)),
+  );
+  const [endAt, setEndAt] = useState(() =>
+    toZonedInput(atZonedTime(addDays(today(), 8), 20)),
   );
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<ActionResult | null>(null);
   if (!item)
     return (
-      <EmptyState
-        title="Objeto no encontrado"
-        description="No existe esta publicación."
+      <NotFound
+        title={t('listing.notFound.title')}
+        description={t('listing.notFound.description')}
       />
     );
   const reserved = item.availabilitySlots.filter(
     (slot) => slot.status === 'RESERVED',
   );
-  const add = () => {
-    if (new Date(endAt) <= new Date(startAt)) {
-      setMessage('La hora final debe ser posterior a la inicial.');
-      return;
-    }
+  const dirty =
+    JSON.stringify(slots) !==
+    JSON.stringify(
+      item.availabilitySlots.filter((slot) => slot.status === 'AVAILABLE'),
+    );
+
+  const upsert = () => {
+    const startIso = fromZonedInput(startAt);
+    const endIso = fromZonedInput(endAt);
+    if (!startIso || !endIso || new Date(endIso) <= new Date(startIso))
+      return setError(t('validation.endAfterStart'));
+    if (new Date(endIso) <= new Date())
+      return setError(t('availability.pastRange'));
     if (
       reserved.some((slot) =>
-        overlaps(startAt, endAt, slot.startAt, slot.endAt),
+        overlaps(startIso, endIso, slot.startAt, slot.endAt),
       )
-    ) {
-      setMessage('El intervalo se superpone con un periodo reservado.');
-      return;
-    }
-    const nextSlot = {
-      id: editingId ?? `slot-${Date.now()}`,
-      startAt: new Date(startAt).toISOString(),
-      endAt: new Date(endAt).toISOString(),
+    )
+      return setError(t('results.availability.overlapsReservation'));
+    if (
+      slots.some(
+        (slot) =>
+          slot.id !== editingId &&
+          overlaps(startIso, endIso, slot.startAt, slot.endAt),
+      )
+    )
+      return setError(t('results.availability.overlapsItself'));
+    const next = {
+      id: editingId ?? `slot-${Date.now().toString(36)}`,
+      startAt: startIso,
+      endAt: endIso,
       status: 'AVAILABLE' as const,
     };
     setSlots((current) =>
       editingId
-        ? current.map((slot) => (slot.id === editingId ? nextSlot : slot))
-        : [...current, nextSlot],
+        ? current.map((slot) => (slot.id === editingId ? next : slot))
+        : [...current, next],
     );
     setEditingId(null);
-    setMessage('');
+    setError('');
+    setResult(null);
   };
+
   return (
     <>
+      <Link className="back-link" to="/my-items">
+        <ArrowLeft aria-hidden="true" />
+        {t('availability.back')}
+      </Link>
       <PageHeader
-        eyebrow="Disponibilidad"
+        eyebrow={t('availability.eyebrow')}
         title={item.title}
-        description="Agrega intervalos. Los periodos reservados permanecen bloqueados."
+        description={t('availability.description')}
         action={
           <Button
             type="button"
-            onClick={() => {
-              const result = saveAvailability(item.id, slots);
-              setMessage(result.message);
-            }}
+            disabled={!dirty}
+            onClick={() => setResult(saveAvailability(item.id, slots))}
           >
-            Guardar disponibilidad
+            {t('availability.save')}
           </Button>
         }
       />
-      <section className="panel">
-        <div className="date-fields">
-          <label>
-            Inicio
-            <input
-              type="datetime-local"
-              value={startAt}
-              onChange={(event) => setStartAt(event.target.value)}
-            />
-          </label>
-          <label>
-            Fin
-            <input
-              type="datetime-local"
-              value={endAt}
-              onChange={(event) => setEndAt(event.target.value)}
-            />
-          </label>
-          <Button type="button" variant="outline" onClick={add}>
-            <Plus />
-            {editingId ? 'Actualizar intervalo' : 'Agregar intervalo'}
-          </Button>
+      {params.get('new') && (
+        <div className="app-banner success">
+          <CheckCircle2 aria-hidden="true" />
+          <p>{t('availability.published')}</p>
         </div>
-        {message && (
-          <output
-            className={
-              message.includes('guardada') ? 'success-text' : 'field-error'
-            }
-          >
-            {message}
-          </output>
-        )}
-        <div className="slot-list">
-          <h2>Intervalos editables</h2>
-          {slots.length ? (
-            slots.map((slot) => (
-              <article key={slot.id}>
-                <span>
-                  <Check />
-                  {shortDate(slot.startAt)} – {shortDate(slot.endAt)}
-                </span>
-                <span className="slot-actions">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Editar intervalo"
-                    onClick={() => {
-                      setEditingId(slot.id);
-                      setStartAt(localValue(new Date(slot.startAt)));
-                      setEndAt(localValue(new Date(slot.endAt)));
-                    }}
-                  >
-                    <Edit3 />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Eliminar intervalo"
-                    onClick={() =>
-                      setSlots((current) =>
-                        current.filter((candidate) => candidate.id !== slot.id),
-                      )
-                    }
-                  >
-                    <Trash2 />
-                  </Button>
-                </span>
-              </article>
-            ))
-          ) : (
-            <p>No agregaste intervalos disponibles.</p>
-          )}
-          <h2>Periodos reservados</h2>
-          {reserved.length ? (
-            reserved.map((slot) => (
-              <article key={slot.id} className="reserved">
-                <span>
-                  <ShieldCheck />
-                  {shortDate(slot.startAt)} – {shortDate(slot.endAt)}
-                </span>
-                <StatusBadge status="CONFIRMED" />
-              </article>
-            ))
-          ) : (
-            <p>No hay reservas que bloqueen el calendario.</p>
-          )}
-        </div>
-      </section>
-    </>
-  );
-}
-
-function Field({
-  label,
-  error,
-  children,
-  wide = false,
-}: {
-  label: string;
-  error?: string;
-  children: React.ReactNode;
-  wide?: boolean;
-}) {
-  return (
-    <label className={`field ${wide ? 'wide' : ''}`}>
-      <span>{label}</span>
-      {children}
-      {error && (
-        <small className="field-error" role="alert">
-          {error}
-        </small>
       )}
-    </label>
+      <Feedback result={result} />
+      <div className="two-panel-grid">
+        <section className="panel">
+          <h2>
+            {editingId
+              ? t('availability.editWindow')
+              : t('availability.addWindow')}
+          </h2>
+          <div className="date-fields">
+            <Field label={t('fields.from')}>
+              <input
+                type="datetime-local"
+                value={startAt}
+                onChange={(event) => setStartAt(event.target.value)}
+              />
+            </Field>
+            <Field label={t('fields.to')}>
+              <input
+                type="datetime-local"
+                value={endAt}
+                min={startAt}
+                onChange={(event) => setEndAt(event.target.value)}
+              />
+            </Field>
+          </div>
+          {error && (
+            <p className="field-error" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="button-row">
+            <Button type="button" variant="outline" onClick={upsert}>
+              <Plus aria-hidden="true" />
+              {editingId ? t('availability.update') : t('availability.add')}
+            </Button>
+            {editingId && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setEditingId(null)}
+              >
+                {t('common.cancel')}
+              </Button>
+            )}
+          </div>
+          {dirty && <p className="muted small">{t('availability.unsaved')}</p>}
+        </section>
+        <section className="panel slot-list">
+          <h2>{t('availability.windows')}</h2>
+          {slots.length ? (
+            <ul>
+              {[...slots]
+                .sort((a, b) => a.startAt.localeCompare(b.startAt))
+                .map((slot) => (
+                  <li key={slot.id}>
+                    <span>
+                      <Check aria-hidden="true" />
+                      {formatDateTime(slot.startAt)} –{' '}
+                      {formatDateTime(slot.endAt)}
+                    </span>
+                    <span className="slot-actions">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={t('availability.editAria')}
+                        onClick={() => {
+                          setEditingId(slot.id);
+                          setStartAt(toZonedInput(slot.startAt));
+                          setEndAt(toZonedInput(slot.endAt));
+                        }}
+                      >
+                        <Edit3 aria-hidden="true" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={t('availability.removeAria')}
+                        onClick={() =>
+                          setSlots((current) =>
+                            current.filter(
+                              (candidate) => candidate.id !== slot.id,
+                            ),
+                          )
+                        }
+                      >
+                        <Trash2 aria-hidden="true" />
+                      </Button>
+                    </span>
+                  </li>
+                ))}
+            </ul>
+          ) : (
+            <p className="muted">{t('availability.noWindows')}</p>
+          )}
+          <h2>{t('availability.reserved')}</h2>
+          {reserved.length ? (
+            <ul>
+              {reserved.map((slot) => (
+                <li key={slot.id} className="reserved">
+                  <span>
+                    <ShieldCheck aria-hidden="true" />
+                    {formatDateTime(slot.startAt)} –{' '}
+                    {formatDateTime(slot.endAt)}
+                  </span>
+                  <StatusBadge kind="reservation" status="CONFIRMED" />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">{t('availability.noReserved')}</p>
+          )}
+        </section>
+      </div>
+    </>
   );
 }
