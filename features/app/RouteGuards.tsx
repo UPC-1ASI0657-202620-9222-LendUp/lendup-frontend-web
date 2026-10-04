@@ -8,21 +8,24 @@ import {
   useParams,
   useSearchParams,
 } from 'react-router-dom';
-import { LoadingSkeleton } from '@/components/lendup/shared';
+import { ErrorState, LoadingSkeleton } from '@/components/lendup/shared';
 import {
   canManageListing,
   canViewIncident,
   canViewLoan,
   canViewReservation,
 } from '@/lib/business-rules';
-import { useDemo } from '@/stores/demo-store';
+import { useLendUp } from '@/hooks/use-lendup';
 import { currentUserOf } from '@/stores/selectors';
 import type { Role } from '@/types/domain';
 
 export function ProtectedRoute() {
-  const { state, hydrated } = useDemo();
+  const { state, hydrated, profileMissing, profileError, retryProfile } =
+    useLendUp();
   const location = useLocation();
   if (!hydrated) return <LoadingSkeleton />;
+  if (profileError) return <ErrorState onRetry={() => void retryProfile()} />;
+  if (profileMissing) return <Navigate to="/register" replace />;
   return state.authenticated && currentUserOf(state) ? (
     <Outlet />
   ) : (
@@ -35,7 +38,7 @@ export function ProtectedRoute() {
 }
 
 function RoleRoute({ allowed }: { allowed: Role }) {
-  const { state } = useDemo();
+  const { state } = useLendUp();
   return currentUserOf(state)?.role === allowed ? (
     <Outlet />
   ) : (
@@ -47,10 +50,16 @@ export const AdminRoute = () => <RoleRoute allowed="ADMIN" />;
 export const StudentRoute = () => <RoleRoute allowed="STUDENT" />;
 
 export function PublicOnlyRoute() {
-  const { state, hydrated } = useDemo();
+  const { state, hydrated, profileMissing, profileError, retryProfile } =
+    useLendUp();
   const location = useLocation();
   if (!hydrated) return <LoadingSkeleton />;
-  if (!state.authenticated) return <Outlet />;
+  if (profileError) return <ErrorState onRetry={() => void retryProfile()} />;
+  if (
+    !state.authenticated ||
+    (profileMissing && location.pathname === '/register')
+  )
+    return <Outlet />;
   const user = currentUserOf(state);
   const registered = location.pathname === '/register';
   const from = (location.state as { from?: string } | null)?.from;
@@ -60,9 +69,18 @@ export function PublicOnlyRoute() {
 }
 
 export function RootRedirect() {
-  const { state, hydrated } = useDemo();
+  const { state, hydrated, profileMissing, profileError, retryProfile } =
+    useLendUp();
   if (!hydrated) return <LoadingSkeleton />;
-  return <Navigate to={state.authenticated ? '/app' : '/login'} replace />;
+  if (profileError) return <ErrorState onRetry={() => void retryProfile()} />;
+  return (
+    <Navigate
+      to={
+        profileMissing ? '/register' : state.authenticated ? '/app' : '/login'
+      }
+      replace
+    />
+  );
 }
 
 export function OperationAccessGuard({
@@ -73,7 +91,8 @@ export function OperationAccessGuard({
   children: ReactNode;
 }) {
   const { id = '' } = useParams();
-  const { state } = useDemo();
+  const { state, dataLoading } = useLendUp();
+  if (dataLoading) return <LoadingSkeleton />;
   const allowed =
     kind === 'reservation'
       ? canViewReservation(state, id, state.currentUserId)
@@ -89,7 +108,8 @@ export function OperationAccessGuard({
 
 export function OwnershipGuard({ children }: { children: ReactNode }) {
   const { id } = useParams();
-  const { state } = useDemo();
+  const { state, dataLoading } = useLendUp();
+  if (dataLoading) return <LoadingSkeleton />;
   const listing = state.listings.find((item) => item.id === id);
   return canManageListing(listing, state.currentUserId) ? (
     children
@@ -100,7 +120,8 @@ export function OwnershipGuard({ children }: { children: ReactNode }) {
 
 export function CheckoutGuard({ children }: { children: ReactNode }) {
   const { id } = useParams();
-  const { state } = useDemo();
+  const { state, dataLoading } = useLendUp();
+  if (dataLoading) return <LoadingSkeleton />;
   const reservation = state.reservations.find((item) => item.id === id);
   return reservation?.borrowerId === state.currentUserId ? (
     children
@@ -111,7 +132,8 @@ export function CheckoutGuard({ children }: { children: ReactNode }) {
 
 export function DeliveryGuard({ children }: { children: ReactNode }) {
   const [params] = useSearchParams();
-  const { state } = useDemo();
+  const { state, dataLoading } = useLendUp();
+  if (dataLoading) return <LoadingSkeleton />;
   const reservation = state.reservations.find(
     (item) => item.id === params.get('reservation'),
   );

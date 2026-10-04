@@ -1,24 +1,10 @@
 'use client';
 
-import { useId, useState } from 'react';
-import {
-  BrainCircuit,
-  FileText,
-  ImagePlus,
-  Info,
-  Trash2,
-  Upload,
-  Video,
-} from 'lucide-react';
+import { useState } from 'react';
+import { BrainCircuit, FileText, Info, Trash2, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/lendup/shared';
-import { appConfig } from '@/config/app-config';
 import { useI18n, type MessageKey } from '@/lib/i18n';
-import { cloudinaryAdapter, UploadError } from '@/services/adapters/cloudinary';
-import {
-  canCompareEvidence,
-  type AnalysisOutcome,
-} from '@/services/adapters/gemini';
 import type { Evidence, EvidenceAnalysis, User } from '@/types/domain';
 
 export function EvidenceUploader({
@@ -34,11 +20,8 @@ export function EvidenceUploader({
   onChange: (evidence: Evidence[]) => void;
   label: string;
 }) {
-  const { t, formatNumber } = useI18n();
-  const inputId = useId();
+  const { t } = useI18n();
   const [note, setNote] = useState('');
-  const [error, setError] = useState('');
-  const [uploading, setUploading] = useState(false);
 
   const base = () => ({
     phase,
@@ -46,37 +29,6 @@ export function EvidenceUploader({
     authorId: author.id,
     createdAt: new Date().toISOString(),
   });
-
-  const addFiles = async (files: FileList | null) => {
-    if (!files?.length) return;
-    setUploading(true);
-    try {
-      const uploaded = await cloudinaryAdapter.uploadMany(files);
-      onChange([
-        ...value,
-        ...uploaded.map((media) => ({
-          ...base(),
-          id: `evidence-${media.publicId}`,
-          type: media.kind,
-          label: media.name,
-          description: media.name,
-          url: media.url,
-        })),
-      ]);
-      setError('');
-    } catch (reason) {
-      setError(
-        reason instanceof UploadError
-          ? t(`uploads.errors.${reason.code}`, {
-              name: reason.fileName,
-              size: formatNumber(cloudinaryAdapter.maxBytes / 1_000_000),
-            })
-          : t('uploads.errors.READ_ERROR', { name: '' }),
-      );
-    } finally {
-      setUploading(false);
-    }
-  };
 
   const addNote = () => {
     const text = note.trim();
@@ -96,30 +48,11 @@ export function EvidenceUploader({
 
   return (
     <div className="evidence-uploader">
-      <label className="upload-zone" htmlFor={inputId}>
-        <ImagePlus aria-hidden="true" />
+      <div className="upload-zone" aria-disabled="true">
+        <Info aria-hidden="true" />
         <strong>{label}</strong>
-        <span>
-          {t('uploads.hint', {
-            size: formatNumber(cloudinaryAdapter.maxBytes / 1_000_000),
-          })}
-        </span>
-        <span className="button-like">
-          <Upload aria-hidden="true" />
-          {uploading ? t('uploads.uploading') : t('uploads.select')}
-        </span>
-      </label>
-      <input
-        id={inputId}
-        className="sr-only"
-        type="file"
-        accept="image/*,video/*"
-        multiple
-        onChange={(event) => {
-          addFiles(event.target.files);
-          event.target.value = '';
-        }}
-      />
+        <span>{t('uploads.errors.NOT_CONFIGURED')}</span>
+      </div>
       <div className="evidence-note-input">
         <label className="field">
           <span className="field-label">{t('evidence.noteLabel')}</span>
@@ -140,11 +73,6 @@ export function EvidenceUploader({
           {t('evidence.addNote')}
         </Button>
       </div>
-      {error && (
-        <p className="field-error" role="alert">
-          {error}
-        </p>
-      )}
       {value.length > 0 && (
         <ul className="evidence-previews" aria-label={t('evidence.attached')}>
           {value.map((item) => (
@@ -235,11 +163,12 @@ export function AnalysisPanel({
 }: {
   analysis?: EvidenceAnalysis;
   evidence: Evidence[];
-  onAnalyze: (outcome: AnalysisOutcome) => void;
+  onAnalyze: () => void;
 }) {
   const { t, formatDateTime } = useI18n();
-  const [outcome, setOutcome] = useState<AnalysisOutcome>('SUCCESS');
-  const ready = canCompareEvidence(evidence);
+  const ready =
+    evidence.some((item) => item.phase === 'INITIAL' && Boolean(item.url)) &&
+    evidence.some((item) => item.phase === 'FINAL' && Boolean(item.url));
   const status = analysis?.status ?? 'IDLE';
   return (
     <div className="ai-panel">
@@ -277,28 +206,11 @@ export function AnalysisPanel({
         {!ready && <p className="muted small">{t('analysis.needsPhotos')}</p>}
       </div>
       <div className="ai-actions">
-        {appConfig.demoMode && (
-          <label className="field compact">
-            <span className="field-label">{t('demo.providerResponse')}</span>
-            <select
-              value={outcome}
-              onChange={(event) =>
-                setOutcome(event.target.value as AnalysisOutcome)
-              }
-            >
-              {(['SUCCESS', 'TIMEOUT', 'ERROR'] as const).map((value) => (
-                <option key={value} value={value}>
-                  {t(`analysis.outcomes.${value}`)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
         <Button
           type="button"
           variant="outline"
           disabled={!ready || status === 'ANALYZING'}
-          onClick={() => onAnalyze(outcome)}
+          onClick={onAnalyze}
         >
           {status === 'ANALYZING'
             ? t('analysis.running')

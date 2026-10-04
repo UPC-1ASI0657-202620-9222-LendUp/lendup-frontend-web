@@ -1,5 +1,7 @@
 # Brechas de documentación del frontend
 
+> Documento histórico previo a la integración productiva. Las configuraciones y decisiones descritas aquí no deben tratarse como contrato vigente. Consulta `FRONTEND_BACKEND_INTEGRATION_CONTRACTS.md` y `README.md` para los gaps reales auditados contra el backend.
+
 Puntos del informe que están incompletos o se contradicen. El frontend toma la decisión indicada y la deja configurable cuando es posible.
 
 1. **Style Guidelines.** El informe no tiene una sección de guía de estilos. El frontend define un sistema de diseño propio derivado del logo (ver `README.md`, sección _Sistema de diseño_): azul `#0C79D8`, `#2E9EFF`, `#68C4FF`, navy `#0A1F3C`, tipografía Plus Jakarta Sans. Se recomienda incorporarlo al informe.

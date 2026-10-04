@@ -1,16 +1,9 @@
-import { appConfig } from '@/config/app-config';
 import { economicBreakdown } from '@/lib/business-rules';
-import { gatewayRequest } from '@/services/api/http-client';
-import { endpoints } from '@/services/api/endpoints';
-import {
-  mercadoPagoAdapter,
-  type PaymentMethod,
-} from '@/services/adapters/mercado-pago';
+import { backendPaymentsService } from '@/services/payments-api.service';
 import type {
   CancellationPolicy,
   Listing,
   PaymentPurpose,
-  ProviderOutcome,
   TermsSnapshot,
 } from '@/types/domain';
 
@@ -23,11 +16,11 @@ export interface CostPolicy {
 }
 
 export const commissionPolicy: CommissionPolicy = {
-  rate: appConfig.lendupCommissionRate,
+  rate: 0,
 };
 export const costPolicy: CostPolicy = {
-  providerFeeRate: appConfig.providerFeeRate,
-  cancellation: { borrowerRefundRate: 1, lenderRefundRate: 1 },
+  providerFeeRate: 0,
+  cancellation: { borrowerRefundRate: 0, lenderRefundRate: 0 },
 };
 
 export function createTermsSnapshot(
@@ -56,15 +49,29 @@ export function quoteListing(listing: Listing, startAt: string, endAt: string) {
 
 export const paymentsService = {
   async getPaymentMethods(purpose: PaymentPurpose): Promise<PaymentMethod[]> {
-    if (!appConfig.demoMode)
-      return gatewayRequest<PaymentMethod[]>(endpoints.payments.methods, {
-        query: { proposito: purpose },
-      });
-    return mercadoPagoAdapter.listMethods(purpose);
-  },
-  charge(purpose: PaymentPurpose, outcome?: ProviderOutcome) {
-    return mercadoPagoAdapter.charge(purpose, outcome);
+    const rows = await backendPaymentsService.methods();
+    return rows
+      .filter((row) => row.estado === 'ACTIVO' || row.estado === 'DISPONIBLE')
+      .map((row) => ({
+        id: typeof row.codigo === 'string' ? row.codigo : '',
+        kind: 'WALLET',
+        brand:
+          typeof row.nombre === 'string'
+            ? row.nombre
+            : typeof row.codigo === 'string'
+              ? row.codigo
+              : '',
+        purposes: [purpose],
+        status: typeof row.estado === 'string' ? row.estado : '',
+      }));
   },
 };
 
-export type { PaymentMethod } from '@/services/adapters/mercado-pago';
+export type PaymentMethodKind = 'CARD' | 'WALLET' | 'ACCOUNT_MONEY' | 'CASH';
+export interface PaymentMethod {
+  id: string;
+  kind: PaymentMethodKind;
+  brand?: string;
+  purposes: PaymentPurpose[];
+  status: string;
+}

@@ -59,9 +59,8 @@ import {
   today,
   zonedDayKey,
 } from '@/lib/dates';
-import { cloudinaryAdapter, UploadError } from '@/services/adapters/cloudinary';
 import { findUniversity } from '@/services/catalog.service';
-import { useDemo, type ActionResult } from '@/stores/demo-store';
+import { useLendUp, type ActionResult } from '@/hooks/use-lendup';
 import {
   currentUserOf,
   listingById,
@@ -99,7 +98,7 @@ function Metric({
 
 function AdminDashboard({ user }: { user: User }) {
   const { t } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const count = (status: string) =>
     state.incidents.filter((item) => item.status === status).length;
   return (
@@ -159,7 +158,7 @@ function NotificationList({
   limit?: number;
 }) {
   const { t } = useI18n();
-  const { state, markNotification } = useDemo();
+  const { state, markNotification } = useLendUp();
   const items = state.notifications
     .filter((item) => item.userId === userId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -181,7 +180,7 @@ function NotificationList({
 
 export function DashboardPage() {
   const { t } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const user = currentUserOf(state);
   if (!user) return null;
   if (user.role === 'ADMIN') return <AdminDashboard user={user} />;
@@ -364,7 +363,7 @@ export function DashboardPage() {
 
 export function NotificationsPage() {
   const { t } = useI18n();
-  const { state, markNotification } = useDemo();
+  const { state, markNotification } = useLendUp();
   const [onlyUnread, setOnlyUnread] = useState(false);
   const notifications = state.notifications
     .filter(
@@ -480,7 +479,7 @@ export function CalendarPage() {
     formatLongDate,
     formatDayNumber,
   } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const [cursor, setCursor] = useState(today);
   const [view, setView] = useState<'month' | 'week' | 'day'>('month');
   const [selected, setSelected] = useState(() => zonedDayKey(new Date()));
@@ -733,7 +732,7 @@ const incomingTypes: TransactionType[] = [
 
 export function TransactionsPage() {
   const { t, formatMoney, formatDateTime } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const [type, setType] = useState<TransactionType | ''>('');
   const [detail, setDetail] = useState<PaymentTransaction | null>(null);
   const methodLabel = usePaymentMethodLabel();
@@ -1013,7 +1012,7 @@ export function TransactionsPage() {
 
 function ProfileContent({ user, own }: { user: User; own: boolean }) {
   const { t, formatDate } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const reputation = reputationOf(state, user.id);
   const university = findUniversity(user.universityId);
   const distribution = [5, 4, 3, 2, 1].map((stars) => ({
@@ -1142,11 +1141,10 @@ function ProfileEditDialog({
   onOpenChange: (open: boolean) => void;
   onSaved: (result: ActionResult) => void;
 }) {
-  const { t, formatNumber } = useI18n();
-  const { updateProfile } = useDemo();
+  const { t } = useI18n();
+  const { updateProfile } = useLendUp();
   const university = findUniversity(user.universityId);
-  const [avatar, setAvatar] = useState(user.avatar ?? '');
-  const [avatarError, setAvatarError] = useState('');
+  const avatar = user.avatar ?? '';
   const schema = useMemo(
     () =>
       z.object({
@@ -1191,8 +1189,8 @@ function ProfileEditDialog({
           id="profile-form"
           className="dialog-body"
           noValidate
-          onSubmit={handleSubmit((values) => {
-            onSaved(updateProfile({ ...values, avatar: avatar || undefined }));
+          onSubmit={handleSubmit(async (values) => {
+            onSaved(await updateProfile(values));
             onOpenChange(false);
           })}
         >
@@ -1208,39 +1206,12 @@ function ProfileEditDialog({
                 {user.initials}
               </span>
             )}
-            <Field
-              label={t('profile.avatar')}
-              error={avatarError}
-              hint={t('uploads.hint', {
-                size: formatNumber(cloudinaryAdapter.maxBytes / 1_000_000),
-              })}
-            >
-              <input
-                type="file"
-                accept="image/*"
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  if (!file) return;
-                  try {
-                    setAvatar(
-                      (await cloudinaryAdapter.upload(file, ['image'])).url,
-                    );
-                    setAvatarError('');
-                  } catch (reason) {
-                    setAvatarError(
-                      reason instanceof UploadError
-                        ? t(`uploads.errors.${reason.code}`, {
-                            name: reason.fileName,
-                            size: formatNumber(
-                              cloudinaryAdapter.maxBytes / 1_000_000,
-                            ),
-                          })
-                        : t('uploads.errors.READ_ERROR', { name: file.name }),
-                    );
-                  }
-                }}
-              />
-            </Field>
+            <div className="field">
+              <span className="field-label">{t('profile.avatar')}</span>
+              <p className="muted small">
+                {t('uploads.errors.NOT_CONFIGURED')}
+              </p>
+            </div>
           </div>
           <Field
             label={t('fields.career')}
@@ -1298,7 +1269,7 @@ function ProfileEditDialog({
 
 export function ProfilePage() {
   const { t } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const user = currentUserOf(state);
   const [open, setOpen] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
@@ -1347,7 +1318,7 @@ export function ProfilePage() {
 export function PublicProfilePage() {
   const { t } = useI18n();
   const { id } = useParams();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const user = userById(state, id);
   if (!user || user.role === 'ADMIN')
     return (

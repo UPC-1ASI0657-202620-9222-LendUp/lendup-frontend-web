@@ -15,6 +15,9 @@ export const en: Messages = {
     processing: 'Processing…',
     loading: 'Loading information',
     pending: 'Pending',
+    requestFailed:
+      'The operation could not be completed by the backend. Check the data and try again.',
+    backendGap: 'This capability is not available in the LendUp API yet.',
     selectOption: 'Select an option',
     saveChanges: 'Save changes',
     viewDetail: 'View details',
@@ -71,27 +74,17 @@ export const en: Messages = {
   },
   banners: {
     verification:
-      'Verify your university email to publish items and request loans.',
-    verificationAction: 'Verify now',
+      'Request verification of your student status to publish items and request loans.',
+    verificationAction: 'Request verification',
     terms:
       'Before your first operation you must review and accept the terms and conditions.',
     termsAction: 'Review terms',
-  },
-  demo: {
-    title: 'Demo environment',
-    viewAs: 'View as',
-    reset: 'Reset demo',
-    quickAccess: 'Demo accounts',
-    passwordHint: 'All accounts use the password {password}.',
-    providerResponse: 'Simulated provider response',
-    providerHint:
-      'Demo mode only: choose how the external provider will respond.',
   },
   auth: {
     hero: {
       title:
         'Student-to-student lending with clear rules and a protected deposit.',
-      point1: 'Only students verified with a university email.',
+      point1: 'University email access with student-status verification.',
       point2: 'Terms, rate and deposit frozen in every reservation.',
       point3: "Evidence of the item's condition before and after each loan.",
     },
@@ -106,7 +99,7 @@ export const en: Messages = {
     register: {
       title: 'Create your university account',
       description:
-        "We'll use your university email to verify that you belong to your campus community.",
+        'Your university email will be the sign-in identity associated with your university profile.',
       cta: 'Create account',
       submit: 'Create my account',
       submitting: 'Creating account…',
@@ -119,34 +112,34 @@ export const en: Messages = {
       haveAccount: 'Already have an account?',
       successTitle: 'Your account was created!',
       successNext:
-        'The next step is to verify your university email so you can publish and request items.',
+        'The next step is to request verification of your student status so you can publish and request items.',
     },
     verify: {
-      title: 'Verify your university email',
-      description: "We'll send a verification link to {email}.",
-      send: 'Send verification link',
-      resend: 'Resend link',
-      sending: 'Sending…',
+      title: 'Request student verification',
+      description:
+        'Your account uses the university email {email}. Enter a valid reference for the backend to process the verification.',
+      referenceLabel: 'Verification reference',
+      referenceHint:
+        'Use the reference requested by your institution, such as your university ID code.',
+      referencePlaceholder: 'Institutional code or reference',
+      send: 'Request verification',
+      resend: 'Update request',
       continue: 'Continue',
       later: 'Do it later',
-      demoHint:
-        'Simulate what happens when you open the link you received by email.',
-      simulateSuccess: 'Simulate valid link',
-      simulateError: 'Simulate invalid link',
       messages: {
+        UNVERIFIED:
+          'Your student status is not verified yet. Enter the required reference to request validation.',
         PENDING:
-          "You haven't verified your email yet. Request the link to start the validation.",
-        SENDING: "We're sending the link to your university email.",
-        SENT: 'We sent you a link. Open it from your university email to complete the verification.',
+          'Your request was submitted and the backend keeps it pending review.',
         VERIFIED:
           'Your student status is verified. You can now operate on LendUp.',
-        ERROR:
-          "We couldn't complete the verification. Your account remains unverified; request a new link.",
       },
     },
     errors: {
       USER_NOT_FOUND: 'There is no account with that email.',
       INVALID_CREDENTIALS: 'The email or password is not valid.',
+      SESSION_EMAIL_MISMATCH:
+        'The current Firebase session belongs to another email. Sign out before registering this account.',
       ACCOUNT_SUSPENDED:
         'This account is suspended. Please contact the LendUp team.',
       EMAIL_TAKEN: 'An account with that email already exists.',
@@ -300,11 +293,9 @@ export const en: Messages = {
       ARCHIVED: 'Removed',
     },
     verification: {
-      PENDING: 'Not verified',
-      SENDING: 'Sending link',
-      SENT: 'Link sent',
+      UNVERIFIED: 'Not verified',
+      PENDING: 'Verification pending',
       VERIFIED: 'Verified',
-      ERROR: 'Verification failed',
     },
   },
   reputation: {
@@ -370,10 +361,11 @@ export const en: Messages = {
   request: {
     dialogTitle: 'Review before requesting',
     dialogDescription: 'Loan request for {title}',
-    periodAvailable: 'The period is available.',
+    periodValidation:
+      'The backend will validate the period when the request is submitted because existing availability is not exposed by the API.',
     reviewTitle: 'Terms set by the lender',
     paymentLater:
-      'Nothing will be charged now. Payment and deposit are processed with the external provider only if the request is accepted.',
+      'Nothing will be charged now. The amount shown is preliminary; the backend does not yet provide an authoritative total quote or real provider confirmation.',
     messageLabel: 'Message for the lender (optional)',
     messageHint: 'Tell them what you need it for. Up to 280 characters.',
     acceptConditions:
@@ -385,6 +377,9 @@ export const en: Messages = {
     title: 'My items',
     description:
       'Manage your listings, their availability and the requests you receive.',
+    activeOnly:
+      'The backend only allows active listings to be queried. Paused or removed listings cannot be recovered in this view.',
+    noActiveTitle: 'No active listings are visible',
     publish: 'Publish item',
     publishFirst: 'Publish my first item',
     edit: 'Edit',
@@ -395,9 +390,6 @@ export const en: Messages = {
     reviewRequests: 'Review requests',
     pendingRequests: 'Requests',
     upcomingReservations: 'Reservations',
-    emptyTitle: "You haven't published items yet",
-    emptyDescription:
-      "Publish something you don't use every day and start receiving requests from your community.",
     archiveTitle: 'Remove listing',
     archiveDescription:
       '“{title}” will stop receiving requests and cannot be reactivated. Confirmed reservations and history are kept.',
@@ -422,38 +414,22 @@ export const en: Messages = {
     descriptionHint:
       'Include accessories, working condition and any relevant details.',
     exchangeHint: 'A public, easy-to-find spot on or near campus.',
-    photosTitle: 'Add clear photos of the item',
-    photosHint:
-      'The first photo will be the cover. JPG or PNG up to {size} MB each.',
-    cover: 'Cover',
+    photosTitle: 'Photo uploads are unavailable',
     conditionsHint:
       'These terms will be shown before a student sends a request.',
     rateHint: 'Charged for every started 24-hour block.',
     guaranteeHint:
       'Leave it at 0 if you do not require a deposit. It is returned at the end if there are no incidents.',
-    publish: 'Publish and set availability',
+    publish: 'Publish item',
     save: 'Save changes',
   },
   availability: {
     eyebrow: 'Availability',
     back: 'Back to my items',
     description:
-      'Set the periods when your item can be requested. Reserved periods stay blocked.',
-    published:
-      'Your item was published. Add its available periods to start receiving requests.',
-    addWindow: 'Add period',
-    editWindow: 'Edit period',
-    add: 'Add period',
-    update: 'Update period',
-    save: 'Save availability',
-    unsaved: 'You have unsaved changes.',
-    windows: 'Available periods',
-    noWindows: "You haven't added available periods yet.",
-    reserved: 'Reserved periods',
-    noReserved: 'There are no reservations blocking the calendar.',
-    pastRange: 'The period must end in the future.',
-    editAria: 'Edit period',
-    removeAria: 'Remove period',
+      'Availability must come from the backend and preserve existing and reserved periods.',
+    backendGap:
+      'The backend can add one interval but cannot list, edit or delete existing availability. Management is disabled to avoid overwriting or duplicating periods without authoritative data.',
   },
   requests: {
     eyebrow: 'Requests',
@@ -586,7 +562,7 @@ export const en: Messages = {
   payments: {
     chooseMethod: 'Payment method',
     noMethods:
-      'The payment provider returned no available methods. Please try later.',
+      'No payment methods are enabled. The provider integration is still pending in the backend.',
     methods: {
       CARD: 'Credit or debit card',
       WALLET: 'Digital wallet',
@@ -595,15 +571,9 @@ export const en: Messages = {
     },
     methodHints: {
       CARD: 'Visa, Mastercard or American Express',
-      WALLET: 'Instant payment from your phone',
+      WALLET: 'Operation handled by the external provider',
       ACCOUNT_MONEY: 'Available balance in your account',
       CASH: 'Code to pay at agents or online banking',
-    },
-    outcomes: {
-      APPROVED: 'Approved',
-      REJECTED: 'Declined',
-      CANCELLED: 'Cancelled by the user',
-      ERROR: 'Provider error',
     },
   },
   checkout: {
@@ -621,6 +591,8 @@ export const en: Messages = {
     rentalDone: 'Rate payment approved.',
     payWithProvider: 'Pay {amount} with Mercado Pago',
     processing: 'Processing with the provider…',
+    providerPending:
+      'The operation was recorded and remains pending provider confirmation.',
     allDone:
       'Done: payment and deposit are confirmed. The lender can now record the handover.',
     security:
@@ -828,13 +800,9 @@ export const en: Messages = {
     types: { PHOTO: 'Photo', VIDEO: 'Video', NOTE: 'Note' },
   },
   uploads: {
-    hint: 'Images or videos up to {size} MB each.',
-    select: 'Select files',
-    uploading: 'Uploading…',
     errors: {
-      FILE_TOO_LARGE: 'The file {name} exceeds the {size} MB limit.',
-      UNSUPPORTED_TYPE: 'The format of {name} is not allowed.',
-      READ_ERROR: "The file {name} couldn't be read.",
+      NOT_CONFIGURED:
+        'File uploads are not available yet because Cloudinary is not part of the current backend contract.',
     },
   },
   analysis: {
@@ -890,6 +858,8 @@ export const en: Messages = {
     },
   },
   incidents: {
+    listGap:
+      'The backend does not provide an incident list for students. You can report an incident and open its immediate detail, but no fabricated history will be shown.',
     eyebrow: 'Trust and safety',
     title: 'Incidents',
     description:
@@ -932,6 +902,8 @@ export const en: Messages = {
     saveStatement: 'Save statement',
   },
   admin: {
+    loanDataGap:
+      'The backend can list this incident but does not expose its loan or security-deposit balance to the administrator. Resolution remains blocked until that authoritative data is available.',
     eyebrow: 'Administration',
     title: 'Incident inbox',
     description:
@@ -1279,7 +1251,7 @@ export const en: Messages = {
     phoneHint:
       'Only shared with your counterpart during an active reservation or loan.',
     readonlyNote:
-      "Your name, university and university email can't be changed because they back your verification.",
+      "Your name, university and university email can't be changed in this form because they identify your backend profile.",
     cycle: 'term {cycle}',
     verified: 'Verified student',
     notVerified: 'Verification pending',
@@ -1306,43 +1278,7 @@ export const en: Messages = {
     title: 'LendUp terms and conditions',
     description:
       'Rules for lending and requesting items within the university community.',
-    version: 'Version {version} · published on {date}',
-    sections: {
-      service: {
-        title: 'Purpose of the service',
-        body: "LendUp is a platform that connects university students for the temporary, paid lending of items. LendUp doesn't own the items or take part in their use.",
-      },
-      accounts: {
-        title: 'Accounts and verification',
-        body: 'Only students with a verified university email can operate. Each person is responsible for the accuracy of their data and the confidentiality of their password.',
-      },
-      listings: {
-        title: 'Listings and terms',
-        body: "The lender sets the daily rate, deposit, usage, handover, return and cancellation terms, and the exchange point. Once a reservation is confirmed, these terms are recorded and don't change even if the listing is edited.",
-      },
-      economics: {
-        title: 'Rates, fee and deposit',
-        body: "The rate is calculated per started 24-hour block. LendUp charges a per-operation fee shown before you pay. Payments and deposits are processed through Mercado Pago; LendUp doesn't store full card details.",
-      },
-      cancellations: {
-        title: 'Cancellations and refunds',
-        body: "A reservation can be cancelled before the item is handed over. If the lender cancels, the full rate and deposit are refunded. If the borrower cancels, the accepted cancellation terms apply. An early return doesn't generate a proportional refund.",
-      },
-      evidence: {
-        title: 'Evidence and incidents',
-        body: "Both parties can record photos, videos and notes about the item's condition. The artificial intelligence analysis is informational only. Incidents are reviewed by the LendUp team, which decides whether to apply the deposit.",
-      },
-      privacy: {
-        title: 'Personal data',
-        body: "Your phone is only shared with your counterpart while there is a confirmed reservation or an active loan. Your current location is only used to sort results and isn't stored.",
-      },
-      conduct: {
-        title: 'Conduct and suspension',
-        body: 'Respectful behavior and care for the items are expected. LendUp may suspend accounts for serious or repeated breaches.',
-      },
-    },
     disclaimer: {
-      title: 'Disclaimer',
       body: "LendUp facilitates agreements between students, but doesn't guarantee the condition or operation of the items. Check the item when you receive it and document its condition with evidence.",
     },
     acceptLabel:
@@ -1362,6 +1298,17 @@ export const en: Messages = {
     open: 'Open in Google Maps',
     embedTitle: 'Map of {place}',
   },
+  httpErrors: {
+    BAD_REQUEST: 'The request is invalid.',
+    UNAUTHENTICATED: 'Your session expired. Sign in again.',
+    FORBIDDEN: 'You are not authorized to perform this operation.',
+    NOT_FOUND: 'The requested resource does not exist.',
+    CONFLICT: 'The operation conflicts with the current state.',
+    VALIDATION_ERROR: 'Review the submitted data.',
+    SERVER_ERROR: 'The backend could not complete the operation.',
+    NETWORK_ERROR: 'The backend could not be reached.',
+    UNKNOWN: 'An unexpected request error occurred.',
+  },
   errors: {
     notFound: {
       title: 'Page not found',
@@ -1375,10 +1322,7 @@ export const en: Messages = {
       registered: 'Account created successfully.',
     },
     verification: {
-      sent: 'We sent you a verification link.',
-      verified: 'Done! Your university email was verified.',
-      failed:
-        'The link is invalid or expired. Your account remains unverified.',
+      sent: 'The verification request was submitted and is pending.',
       notAllowed: "This account can't be verified.",
     },
     profile: { saved: 'Profile updated successfully.' },
@@ -1388,7 +1332,7 @@ export const en: Messages = {
     },
     gate: {
       verificationRequired:
-        'Verify your university email before doing this operation.',
+        'Complete student verification before doing this operation.',
       termsRequired:
         'Accept the terms and conditions before doing this operation.',
       forbidden: "You don't have permission to do this action.",
@@ -1396,17 +1340,6 @@ export const en: Messages = {
     listing: {
       published: 'Item published.',
       updated: 'Listing updated. Changes apply to new requests.',
-      paused: "Listing paused: it won't receive new requests.",
-      reactivated: 'Listing reactivated.',
-      archived: 'Listing removed. Its history was kept.',
-      archivedLocked: "A removed listing can't be modified.",
-      invalidRate: 'The daily rate must be greater than zero.',
-    },
-    availability: {
-      saved: 'Availability saved.',
-      invalidRange: 'Each period must end after it starts.',
-      overlapsReservation: 'The period overlaps a confirmed reservation.',
-      overlapsItself: 'The period overlaps another available period.',
     },
     request: {
       created: "Request sent. We'll let you know when the lender responds.",
@@ -1418,8 +1351,6 @@ export const en: Messages = {
       ownListing: "You can't request your own item.",
       invalidRange: 'The end date must be after the start date.',
       pastStart: 'The period must start in the future.',
-      periodUnavailable:
-        "The selected period isn't within the published availability.",
       periodTaken: 'That period was already reserved by another request.',
     },
     reservation: {
@@ -1430,18 +1361,8 @@ export const en: Messages = {
       reasonRequired: 'Provide the cancellation reason.',
     },
     payment: {
-      approved: 'Payment approved by the provider.',
-      guaranteeHeld: 'Deposit placed successfully.',
-      alreadyPaid: 'This payment was already processed.',
-      guaranteeFirst:
-        'Place the security deposit first; then you can pay the rate.',
-      guaranteeAlreadyHeld: 'The deposit was already placed.',
-      REJECTED:
-        'The provider declined the operation. Try another payment method.',
-      CANCELLED: 'The operation was cancelled. Nothing was charged.',
-      ERROR:
-        'The provider returned an error. The operation remains pending; you can retry.',
-      APPROVED: 'Payment approved by the provider.',
+      guaranteePending:
+        'The deposit request was recorded and remains pending confirmation.',
     },
     delivery: {
       recorded:

@@ -1,5 +1,8 @@
 import type { CategoryCode, ConditionCode, University } from '@/types/domain';
 
+// BACKEND GAP: the API has no endpoints for universities, campuses or categories.
+// This public reference configuration is used only to populate forms. The sole
+// category present in backend data.sql is OTROS.
 export const universities: University[] = [
   {
     id: 'UPC',
@@ -91,15 +94,7 @@ export const universities: University[] = [
   },
 ];
 
-export const categories: CategoryCode[] = [
-  'CALCULATORS',
-  'CAMERAS',
-  'BOOKS',
-  'TOOLS',
-  'ELECTRONICS',
-  'OTHER',
-];
-
+export const categories: CategoryCode[] = ['OTHER'];
 export const conditions: ConditionCode[] = [
   'NEW',
   'EXCELLENT',
@@ -107,7 +102,6 @@ export const conditions: ConditionCode[] = [
   'GOOD',
   'FAIR',
 ];
-
 export const incidentTypes = [
   'DAMAGE',
   'LOSS',

@@ -40,8 +40,8 @@ import { useEvidenceAnalysis } from '@/hooks/use-evidence-analysis';
 import { useI18n, type MessageKey } from '@/lib/i18n';
 import { remainingGuarantee } from '@/lib/business-rules';
 import { zonedDayKey } from '@/lib/dates';
-import { incidentTypes } from '@/mocks/catalog';
-import { useDemo, type ActionResult } from '@/stores/demo-store';
+import { incidentTypes } from '@/config/reference-data';
+import { useLendUp, type ActionResult } from '@/hooks/use-lendup';
 import { currentUserOf, listingById, userById } from '@/stores/selectors';
 import type {
   Evidence,
@@ -80,7 +80,7 @@ function IncidentProgress({ incident }: { incident: Incident }) {
 
 function ResolutionSummary({ incident }: { incident: Incident }) {
   const { t, formatMoney, formatDateTime } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   if (!incident.resolution) return null;
   const { resolution } = incident;
   return (
@@ -108,7 +108,7 @@ function ResolutionSummary({ incident }: { incident: Incident }) {
 
 export function IncidentsPage() {
   const { t, formatDateTime } = useI18n();
-  const { state, reportIncident } = useDemo();
+  const { state, reportIncident } = useLendUp();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const user = currentUserOf(state);
@@ -149,10 +149,10 @@ export function IncidentsPage() {
         : undefined,
   };
 
-  const submit = () => {
+  const submit = async () => {
     setTouched(true);
     if (errors.loan || errors.type || errors.description || !type) return;
-    const outcome = reportIncident(loanId, type, description, evidence);
+    const outcome = await reportIncident(loanId, type, description, evidence);
     setResult(outcome);
     if (outcome.ok && outcome.id) navigate(`/incidents/${outcome.id}`);
   };
@@ -305,9 +305,9 @@ export function IncidentsPage() {
       ) : (
         !showForm && (
           <EmptyState
-            icon={ShieldCheck}
-            title={t('incidents.emptyTitle')}
-            description={t('incidents.emptyDescription')}
+            icon={ShieldAlert}
+            title={t('common.backendGap')}
+            description={t('incidents.listGap')}
           />
         )
       )}
@@ -318,17 +318,35 @@ export function IncidentsPage() {
 export function IncidentDetailPage() {
   const { t, formatDateTime } = useI18n();
   const { id } = useParams();
-  const { state, submitCounterpartyStatement } = useDemo();
+  const { state } = useLendUp();
   const [statement, setStatement] = useState('');
-  const [result, setResult] = useState<ActionResult | null>(null);
   const incident = state.incidents.find((item) => item.id === id);
   const loan = state.loans.find((item) => item.id === incident?.loanId);
-  if (!incident || !loan)
+  if (!incident)
     return (
       <NotFound
         title={t('incidents.notFound')}
         description={t('errors.notFound.description')}
       />
+    );
+  if (!loan)
+    return (
+      <>
+        <Link className="back-link" to="/admin/incidents">
+          <ArrowLeft aria-hidden="true" />
+          {t('admin.back')}
+        </Link>
+        <PageHeader
+          eyebrow={`${t('admin.eyebrow')} · ${incident.id}`}
+          title={t(`incidentTypes.${incident.type}`)}
+          description={formatDateTime(incident.createdAt)}
+        />
+        <EmptyState
+          icon={ShieldAlert}
+          title={t('common.backendGap')}
+          description={t('admin.loanDataGap')}
+        />
+      </>
     );
   const listing = listingById(state, loan.listingId);
   const reporter = userById(state, incident.reportedBy);
@@ -411,14 +429,8 @@ export function IncidentDetailPage() {
               onChange={(event) => setStatement(event.target.value)}
             />
           </Field>
-          <Feedback result={result} />
-          <Button
-            type="button"
-            disabled={statement.trim().length < 20}
-            onClick={() =>
-              setResult(submitCounterpartyStatement(incident.id, statement))
-            }
-          >
+          <p className="muted small">{t('common.backendGap')}</p>
+          <Button type="button" disabled title={t('common.backendGap')}>
             {t('incidents.saveStatement')}
           </Button>
         </section>
@@ -431,7 +443,7 @@ const incidentStatuses: IncidentStatus[] = ['OPEN', 'UNDER_REVIEW', 'RESOLVED'];
 
 export function AdminIncidentsPage() {
   const { t, formatDateTime, formatMoney } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const [status, setStatus] = useState<IncidentStatus | ''>('');
   const [type, setType] = useState<IncidentType | ''>('');
   const [date, setDate] = useState('');
@@ -639,8 +651,7 @@ export function AdminIncidentDetailPage() {
   const { t, formatDateTime, formatMoney } = useI18n();
   const { id } = useParams();
   const navigate = useNavigate();
-  const { state, resolveIncident, startIncidentReview, addIncidentAdminNote } =
-    useDemo();
+  const { state, resolveIncident } = useLendUp();
   const incident = state.incidents.find((item) => item.id === id);
   const loan = state.loans.find((item) => item.id === incident?.loanId);
   const { analysis, run } = useEvidenceAnalysis(loan);
@@ -707,12 +718,12 @@ export function AdminIncidentDetailPage() {
         ? Math.max(0, Number(amountValue) || 0)
         : 0;
 
-  const resolve = () => {
+  const resolve = async () => {
     const values = getValues();
-    const outcome = resolveIncident(
+    const outcome = await resolveIncident(
       incident.id,
       values.decision,
-      values.decision === 'PARTIAL' ? values.amount : 0,
+      captured,
       values.justification,
     );
     setResult(outcome);
@@ -734,10 +745,7 @@ export function AdminIncidentDetailPage() {
           <div className="header-actions">
             <StatusBadge kind="incident" status={incident.status} />
             {incident.status === 'OPEN' && (
-              <Button
-                type="button"
-                onClick={() => setResult(startIncidentReview(incident.id))}
-              >
+              <Button type="button" disabled title={t('common.backendGap')}>
                 {t('admin.startReview')}
               </Button>
             )}
@@ -867,12 +875,8 @@ export function AdminIncidentDetailPage() {
               <Button
                 type="button"
                 variant="outline"
-                disabled={note.trim().length < 5}
-                onClick={() => {
-                  const outcome = addIncidentAdminNote(incident.id, note);
-                  setResult(outcome);
-                  if (outcome.ok) setNote('');
-                }}
+                disabled
+                title={t('common.backendGap')}
               >
                 {t('admin.addNote')}
               </Button>
@@ -882,7 +886,7 @@ export function AdminIncidentDetailPage() {
           ) : null}
         </section>
       </div>
-      {incident.status === 'UNDER_REVIEW' && (
+      {incident.status !== 'RESOLVED' && (
         <form
           className="panel resolution-form"
           onSubmit={handleSubmit(() => setConfirmOpen(true))}

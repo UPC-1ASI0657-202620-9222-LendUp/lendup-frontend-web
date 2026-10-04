@@ -1,7 +1,7 @@
 import type {
   AvailabilitySlot,
   Coordinates,
-  DemoState,
+  AppState,
   Incident,
   IncidentStatus,
   Listing,
@@ -158,7 +158,7 @@ export function counterpartOf(
 }
 
 export function canViewReservation(
-  state: DemoState,
+  state: AppState,
   id: string,
   userId: string,
 ) {
@@ -166,13 +166,13 @@ export function canViewReservation(
   return Boolean(item && isParticipant(item, userId));
 }
 
-export function canViewLoan(state: DemoState, id: string, userId: string) {
+export function canViewLoan(state: AppState, id: string, userId: string) {
   const item = state.loans.find((loan) => loan.id === id);
   return Boolean(item && isParticipant(item, userId));
 }
 
 export function canViewIncident(
-  state: DemoState,
+  state: AppState,
   incident: Incident | undefined,
   userId: string,
 ) {

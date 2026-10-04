@@ -1,11 +1,6 @@
 export type Role = 'STUDENT' | 'ADMIN';
 export type AccountStatus = 'ACTIVE' | 'SUSPENDED';
-export type VerificationStatus =
-  | 'PENDING'
-  | 'SENDING'
-  | 'SENT'
-  | 'VERIFIED'
-  | 'ERROR';
+export type VerificationStatus = 'UNVERIFIED' | 'PENDING' | 'VERIFIED';
 export type ListingStatus = 'ACTIVE' | 'PAUSED' | 'ARCHIVED';
 export type RequestStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED';
 export type ReservationStatus =
@@ -79,7 +74,6 @@ export type CategoryCode =
   | 'OTHER';
 export type ConditionCode = 'NEW' | 'EXCELLENT' | 'VERY_GOOD' | 'GOOD' | 'FAIR';
 export type PaymentPurpose = 'RENTAL' | 'GUARANTEE' | 'EXTENSION';
-export type ProviderOutcome = 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'ERROR';
 
 export interface Coordinates {
   lat: number;
@@ -115,7 +109,6 @@ export interface User {
   verificationStatus: VerificationStatus;
   role: Role;
   accountStatus: AccountStatus;
-  password: string;
 }
 
 export interface ListingMedia {
@@ -383,6 +376,8 @@ export interface AppNotification {
   id: string;
   userId: string;
   event: NotificationEvent;
+  title?: string;
+  message?: string;
   params: NotificationParams;
   createdAt: string;
   read: boolean;
@@ -423,8 +418,7 @@ export interface TermsAcceptance {
   version: string;
   acceptedAt: string;
 }
-export interface DemoState {
-  version: 4;
+export interface AppState {
   currentUserId: string;
   authenticated: boolean;
   termsAcceptances: TermsAcceptance[];

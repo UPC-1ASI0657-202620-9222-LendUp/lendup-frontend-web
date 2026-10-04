@@ -1,8 +1,7 @@
-import { appConfig } from '@/config/app-config';
-import { categories, conditions, universities } from '@/mocks/catalog';
+import { categories, conditions, universities } from '@/config/reference-data';
 import { distanceKm, isPeriodAvailable } from '@/lib/business-rules';
-import { gatewayRequest } from '@/services/api/http-client';
-import { endpoints } from '@/services/api/endpoints';
+import { backendCatalogService } from '@/services/catalog-api.service';
+import { mapListing } from '@/services/api/mappers/domain';
 import type {
   CategoryCode,
   Coordinates,
@@ -101,18 +100,24 @@ export const catalogService = {
   universities,
   categories,
   conditions,
-  async searchListings(source: Listing[], filters: ListingFilters) {
-    if (!appConfig.demoMode)
-      return gatewayRequest<Listing[]>(endpoints.catalog.search, {
-        query: {
-          nombre: filters.query,
-          categoria: filters.category,
-          campus: filters.campus,
-          desde: filters.from,
-          hasta: filters.to,
-        },
-      });
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    return source.filter((listing) => listing.status === 'ACTIVE');
+  async searchListings(_source: Listing[], filters: ListingFilters) {
+    const rows = await backendCatalogService.search({
+      nombre: filters.query,
+      categoria: filters.category
+        ? '00000000-0000-4000-8000-000000000003'
+        : undefined,
+      campus: filters.campus,
+      desde: filters.from || undefined,
+      hasta: filters.to || undefined,
+    });
+    return rows
+      .map(mapListing)
+      .filter(
+        (listing) =>
+          (!filters.universityId ||
+            listing.universityId === filters.universityId) &&
+          (!filters.location ||
+            normalize(listing.location).includes(normalize(filters.location))),
+      );
   },
 };

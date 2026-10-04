@@ -7,7 +7,7 @@ import { AppShell } from '@/components/lendup/AppShell';
 import { LogoStacked } from '@/components/lendup/Brand';
 import { NotFound } from '@/components/lendup/shared';
 import { I18nProvider, useI18n } from '@/lib/i18n';
-import { DemoProvider } from '@/stores/demo-store';
+import { AuthProvider } from '@/features/auth/AuthProvider';
 import {
   LoginPage,
   RegisterPage,
@@ -183,9 +183,9 @@ export function LendUpApp() {
   return (
     <I18nProvider>
       <QueryClientProvider client={queryClient}>
-        <DemoProvider>
+        <AuthProvider>
           <AppRoutes />
-        </DemoProvider>
+        </AuthProvider>
       </QueryClientProvider>
     </I18nProvider>
   );

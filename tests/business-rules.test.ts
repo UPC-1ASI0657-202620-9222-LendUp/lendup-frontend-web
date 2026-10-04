@@ -40,10 +40,10 @@ import {
 } from '../lib/business-rules.ts';
 import { en } from '../lib/i18n/en.ts';
 import { es } from '../lib/i18n/es.ts';
-import { universities } from '../mocks/catalog.ts';
+import { universities } from '../config/reference-data.ts';
 import type {
   AvailabilitySlot,
-  DemoState,
+  AppState,
   Incident,
   Loan,
   PaymentTransaction,
@@ -380,7 +380,7 @@ describe('Identidad y acceso', () => {
     const state = {
       reservations: [reservation()],
       loans: [loan()],
-    } as unknown as DemoState;
+    } as unknown as AppState;
     assert.ok(canViewReservation(state, 'rs1', 'b'));
     assert.ok(!canViewReservation(state, 'rs1', 'x'));
     assert.ok(canViewLoan(state, 'ln1', 'l'));

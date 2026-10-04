@@ -1,28 +1,23 @@
-import { appConfig } from '@/config/app-config';
-import { hasAcceptedTerms, hasUnresolvedIncident } from '@/lib/business-rules';
-import type { DemoState, Listing, Loan, User } from '@/types/domain';
+import { hasUnresolvedIncident } from '@/lib/business-rules';
+import type { AppState, Listing, Loan, User } from '@/types/domain';
 
-export function currentUserOf(state: DemoState): User | undefined {
+export function currentUserOf(state: AppState): User | undefined {
   return state.users.find((user) => user.id === state.currentUserId);
 }
 
-export function userById(state: DemoState, id: string | undefined) {
+export function userById(state: AppState, id: string | undefined) {
   return state.users.find((user) => user.id === id);
 }
 
-export function listingById(state: DemoState, id: string | undefined) {
+export function listingById(state: AppState, id: string | undefined) {
   return state.listings.find((listing) => listing.id === id);
 }
 
-export function termsAcceptedBy(state: DemoState, userId: string) {
-  return hasAcceptedTerms(
-    state.termsAcceptances,
-    userId,
-    appConfig.termsVersion,
-  );
+export function termsAcceptedBy(state: AppState, userId: string) {
+  return state.termsAcceptances.some((item) => item.userId === userId);
 }
 
-export function reputationOf(state: DemoState, userId: string) {
+export function reputationOf(state: AppState, userId: string) {
   const ratings = state.ratings.filter(
     (rating) => rating.targetUserId === userId,
   );
@@ -42,23 +37,23 @@ export function reputationOf(state: DemoState, userId: string) {
   };
 }
 
-export function loansOf(state: DemoState, userId: string) {
+export function loansOf(state: AppState, userId: string) {
   return state.loans.filter(
     (loan) => loan.borrowerId === userId || loan.lenderId === userId,
   );
 }
 
-export function incidentsOfLoan(state: DemoState, loanId: string) {
+export function incidentsOfLoan(state: AppState, loanId: string) {
   return state.incidents.filter((incident) => incident.loanId === loanId);
 }
 
-export function loanHasOpenIncident(state: DemoState, loan: Loan) {
+export function loanHasOpenIncident(state: AppState, loan: Loan) {
   return hasUnresolvedIncident(
     incidentsOfLoan(state, loan.id).map((incident) => incident.status),
   );
 }
 
-export function pendingRequestsFor(state: DemoState, listing: Listing) {
+export function pendingRequestsFor(state: AppState, listing: Listing) {
   return state.requests.filter(
     (request) =>
       request.listingId === listing.id && request.status === 'PENDING',

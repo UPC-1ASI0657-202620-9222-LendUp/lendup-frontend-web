@@ -10,19 +10,18 @@ import {
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { CheckCircle2, MailCheck, ShieldCheck, UserRound } from 'lucide-react';
+import { CheckCircle2, MailCheck, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Brand } from '@/components/lendup/Brand';
 import { LanguageSwitcher } from '@/components/lendup/LanguageSwitcher';
 import { Field } from '@/components/lendup/forms';
 import { Feedback, PageHeader, StatusBadge } from '@/components/lendup/shared';
 import { TermsAcceptance, TermsDocument } from '@/components/lendup/terms';
-import { appConfig, supportedLocales } from '@/config/app-config';
+import { supportedLocales } from '@/config/app-config';
 import { translate, useI18n, type MessageKey } from '@/lib/i18n';
 import { isInstitutionalEmail } from '@/lib/business-rules';
-import { demoAccounts, demoPassword } from '@/mocks/seed';
 import { catalogService, findUniversity } from '@/services/catalog.service';
-import { useDemo, type ActionResult } from '@/stores/demo-store';
+import { useLendUp, type ActionResult } from '@/hooks/use-lendup';
 import { currentUserOf, termsAcceptedBy } from '@/stores/selectors';
 
 function StableLabel({ messageKey }: { messageKey: MessageKey }) {
@@ -40,7 +39,7 @@ function StableLabel({ messageKey }: { messageKey: MessageKey }) {
 
 export function PublicHeader() {
   const { t } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   return (
     <header className="public-header">
       <Brand to="/" label={t('nav.brandHome')} />
@@ -117,7 +116,7 @@ function AuthFrame({
 
 export function LoginPage() {
   const { t } = useI18n();
-  const { login } = useDemo();
+  const { login } = useLendUp();
   const schema = useMemo(
     () =>
       z.object({
@@ -181,39 +180,13 @@ export function LoginPage() {
           <Link to="/register">{t('auth.register.cta')}</Link>
         </p>
       </form>
-      {appConfig.demoMode && (
-        <div className="demo-access">
-          <p className="eyebrow">{t('demo.quickAccess')}</p>
-          <div>
-            {demoAccounts.map((account) => (
-              <button
-                key={account.id}
-                type="button"
-                onClick={() => {
-                  setValue('email', account.email);
-                  setValue('password', demoPassword);
-                }}
-              >
-                <UserRound aria-hidden="true" />
-                <span>
-                  <strong>{account.name}</strong>
-                  <small>{t(`roles.${account.role}`)}</small>
-                </span>
-              </button>
-            ))}
-          </div>
-          <small className="muted">
-            {t('demo.passwordHint', { password: demoPassword })}
-          </small>
-        </div>
-      )}
     </AuthFrame>
   );
 }
 
 export function RegisterPage() {
   const { t } = useI18n();
-  const { registerUser } = useDemo();
+  const { registerUser } = useLendUp();
   const [result, setResult] = useState<ActionResult | null>(null);
   const schema = useMemo(
     () =>
@@ -283,9 +256,9 @@ export function RegisterPage() {
       <form
         noValidate
         className="auth-form form-grid"
-        onSubmit={handleSubmit((raw) => {
+        onSubmit={handleSubmit(async (raw) => {
           const values = schema.parse(raw);
-          const outcome = registerUser({
+          const outcome = await registerUser({
             name: values.name,
             email: values.email,
             phone: values.phone,
@@ -439,8 +412,9 @@ export function VerifyEmailPage() {
   const registered = Boolean(
     (location.state as { registered?: boolean } | null)?.registered,
   );
-  const { state, requestVerification, completeVerification } = useDemo();
+  const { state, requestVerification } = useLendUp();
   const [result, setResult] = useState<ActionResult | null>(null);
+  const [reference, setReference] = useState('');
   const user = currentUserOf(state);
   if (!user) return null;
   const status = user.verificationStatus;
@@ -473,39 +447,30 @@ export function VerifyEmailPage() {
           </Button>
         ) : (
           <>
+            <Field
+              label={t('auth.verify.referenceLabel')}
+              hint={t('auth.verify.referenceHint')}
+              required
+            >
+              <input
+                value={reference}
+                onChange={(event) => setReference(event.target.value)}
+                placeholder={t('auth.verify.referencePlaceholder')}
+                autoComplete="off"
+              />
+            </Field>
             <Button
               type="button"
-              variant={status === 'SENT' ? 'outline' : 'default'}
-              disabled={status === 'SENDING'}
-              onClick={async () => setResult(await requestVerification())}
+              variant={status === 'PENDING' ? 'outline' : 'default'}
+              disabled={!reference.trim()}
+              onClick={async () =>
+                setResult(await requestVerification(reference))
+              }
             >
-              {status === 'SENDING'
-                ? t('auth.verify.sending')
-                : status === 'PENDING'
-                  ? t('auth.verify.send')
-                  : t('auth.verify.resend')}
+              {status === 'PENDING'
+                ? t('auth.verify.resend')
+                : t('auth.verify.send')}
             </Button>
-            {appConfig.demoMode && status === 'SENT' && (
-              <div className="demo-box">
-                <p className="eyebrow">{t('demo.title')}</p>
-                <p className="muted small">{t('auth.verify.demoHint')}</p>
-                <div className="button-row">
-                  <Button
-                    type="button"
-                    onClick={() => setResult(completeVerification('SUCCESS'))}
-                  >
-                    {t('auth.verify.simulateSuccess')}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setResult(completeVerification('ERROR'))}
-                  >
-                    {t('auth.verify.simulateError')}
-                  </Button>
-                </div>
-              </div>
-            )}
             <Button variant="ghost" render={<Link to="/app" />}>
               {t('auth.verify.later')}
             </Button>
@@ -518,7 +483,7 @@ export function VerifyEmailPage() {
 
 export function TermsPage() {
   const { t } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = params.get('next') ?? '/app';
