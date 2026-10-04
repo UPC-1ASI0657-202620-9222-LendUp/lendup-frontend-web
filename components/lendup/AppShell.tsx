@@ -1,6 +1,6 @@
 'use client';
 
-import { startTransition, useState } from 'react';
+import { useState } from 'react';
 import {
   Link,
   NavLink,
@@ -12,7 +12,6 @@ import {
   AlertTriangle,
   Bell,
   CalendarDays,
-  ChevronDown,
   CircleDollarSign,
   ClipboardList,
   Home,
@@ -20,7 +19,6 @@ import {
   LogOut,
   Menu,
   Package,
-  RefreshCcw,
   Search,
   ShieldAlert,
   ShieldCheck,
@@ -39,10 +37,9 @@ import {
 import { Brand } from '@/components/lendup/Brand';
 import { LanguageSwitcher } from '@/components/lendup/LanguageSwitcher';
 import { Avatar } from '@/components/lendup/shared';
-import { appConfig } from '@/config/app-config';
 import { useI18n, type MessageKey } from '@/lib/i18n';
 import { findUniversity } from '@/services/catalog.service';
-import { useDemo } from '@/stores/demo-store';
+import { useLendUp } from '@/hooks/use-lendup';
 import { currentUserOf, termsAcceptedBy } from '@/stores/selectors';
 import type { Role } from '@/types/domain';
 
@@ -112,7 +109,7 @@ const mobilePrimary: Record<Role, string[]> = {
 };
 
 export function AppShell() {
-  const { state, switchUser, resetDemo, logout } = useDemo();
+  const { state, logout } = useLendUp();
   const { t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
@@ -120,9 +117,6 @@ export function AppShell() {
   const [query, setQuery] = useState('');
   const current = currentUserOf(state);
   if (!current) return null;
-  const demoAccounts = state.users.filter(
-    (user) => user.accountStatus === 'ACTIVE',
-  );
 
   const groups = navigation[current.role];
   const items = groups.flatMap((group) => group.items);
@@ -158,14 +152,8 @@ export function AppShell() {
     </NavLink>
   );
 
-  const changeUser = (id: string) =>
-    startTransition(() => {
-      switchUser(id);
-      navigate('/app');
-    });
-
-  const signOut = () => {
-    logout();
+  const signOut = async () => {
+    await logout();
     navigate('/login');
   };
 
@@ -184,30 +172,6 @@ export function AppShell() {
             </div>
           ))}
         </nav>
-        {appConfig.demoMode && (
-          <div className="demo-panel">
-            <p className="nav-group-label">{t('demo.title')}</p>
-            <label htmlFor="demo-user">{t('demo.viewAs')}</label>
-            <div className="select-wrap">
-              <select
-                id="demo-user"
-                value={current.id}
-                onChange={(event) => changeUser(event.target.value)}
-              >
-                {demoAccounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name} · {t(`roles.${account.role}`)}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown aria-hidden="true" />
-            </div>
-            <button type="button" onClick={resetDemo}>
-              <RefreshCcw aria-hidden="true" />
-              {t('demo.reset')}
-            </button>
-          </div>
-        )}
       </aside>
       <div className="app-main">
         <header className="topbar">
@@ -329,22 +293,6 @@ export function AppShell() {
           </nav>
           <div className="mobile-menu-footer">
             <LanguageSwitcher />
-            {appConfig.demoMode && (
-              <select
-                aria-label={t('demo.viewAs')}
-                value={current.id}
-                onChange={(event) => {
-                  setMenuOpen(false);
-                  changeUser(event.target.value);
-                }}
-              >
-                {demoAccounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}
-                  </option>
-                ))}
-              </select>
-            )}
             <Button type="button" variant="outline" onClick={signOut}>
               <LogOut aria-hidden="true" />
               {t('nav.signOut')}

@@ -53,7 +53,6 @@ import {
 } from '@/components/lendup/evidence';
 import { ConfirmDialog, Field } from '@/components/lendup/forms';
 import { fromZonedInput, toZonedInput } from '@/lib/dates';
-import { appConfig } from '@/config/app-config';
 import { useEvidenceAnalysis } from '@/hooks/use-evidence-analysis';
 import { useOperationGate } from '@/hooks/use-operation-gate';
 import { usePaymentMethodLabel } from '@/hooks/use-payment-method-label';
@@ -70,13 +69,12 @@ import {
   loanNextAction,
   type LoanNextAction,
 } from '@/lib/business-rules';
-import {
-  providerOutcomes,
-  type PaymentMethod,
-} from '@/services/adapters/mercado-pago';
 import { campusCoordinates, findUniversity } from '@/services/catalog.service';
-import { paymentsService } from '@/services/payments.service';
-import { useDemo, type ActionResult } from '@/stores/demo-store';
+import {
+  paymentsService,
+  type PaymentMethod,
+} from '@/services/payments.service';
+import { useLendUp, type ActionResult } from '@/hooks/use-lendup';
 import {
   currentUserOf,
   incidentsOfLoan,
@@ -90,7 +88,6 @@ import type {
   Loan,
   LoanRequest,
   PaymentPurpose,
-  ProviderOutcome,
   Reservation,
   User,
 } from '@/types/domain';
@@ -141,7 +138,7 @@ function PartyCard({
   showPhone: boolean;
 }) {
   const { t } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   if (!user) return null;
   const reputation = reputationOf(state, user.id);
   return (
@@ -170,7 +167,7 @@ function PartyCard({
 
 export function RequestsPage() {
   const { t, formatDateTime } = useI18n();
-  const { state, respondRequest, cancelRequest } = useDemo();
+  const { state, respondRequest, cancelRequest } = useLendUp();
   const [params] = useSearchParams();
   const { guard, dialog } = useOperationGate();
   const received = state.requests.filter(
@@ -199,13 +196,13 @@ export function RequestsPage() {
     (request) => request.id === pendingAction?.id,
   );
 
-  const confirm = () => {
+  const confirm = async () => {
     if (!pendingAction) return;
-    const run = () =>
+    const run = async () =>
       setResult(
-        pendingAction.kind === 'cancel'
+        await (pendingAction.kind === 'cancel'
           ? cancelRequest(pendingAction.id)
-          : respondRequest(pendingAction.id, pendingAction.kind === 'accept'),
+          : respondRequest(pendingAction.id, pendingAction.kind === 'accept')),
       );
     setPendingAction(null);
     if (pendingAction.kind === 'accept') guard(run);
@@ -315,7 +312,7 @@ function RequestCard({
   onAction: (kind: 'accept' | 'reject' | 'cancel') => void;
 }) {
   const { t, formatDateTime, formatMoney, formatRelative } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const listing = listingById(state, request.listingId);
   const person = userById(
     state,
@@ -451,7 +448,7 @@ function RequestCard({
 
 export function ReservationsPage() {
   const { t, formatDateTime } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const [tab, setTab] = useState<'current' | 'history'>('current');
   const mine = state.reservations.filter(
     (reservation) =>
@@ -563,7 +560,7 @@ export function ReservationsPage() {
 
 function ReservationActions({ reservation }: { reservation: Reservation }) {
   const { t } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const isBorrower = reservation.borrowerId === state.currentUserId;
   const loan = state.loans.find(
     (item) => item.reservationId === reservation.id,
@@ -605,7 +602,7 @@ function ReservationActions({ reservation }: { reservation: Reservation }) {
 export function ReservationDetailPage() {
   const { t, formatDateTime, formatMoney } = useI18n();
   const { id } = useParams();
-  const { state, cancelReservation } = useDemo();
+  const { state, cancelReservation } = useLendUp();
   const methodLabel = usePaymentMethodLabel();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState('');
@@ -769,8 +766,8 @@ export function ReservationDetailPage() {
         confirmLabel={t('reservations.cancelConfirm')}
         destructive
         disabled={reason.trim().length < 5}
-        onConfirm={() => {
-          setResult(cancelReservation(reservation.id, reason));
+        onConfirm={async () => {
+          setResult(await cancelReservation(reservation.id, reason));
           setCancelOpen(false);
         }}
       >
@@ -856,31 +853,6 @@ function MethodPicker({
   );
 }
 
-function OutcomePicker({
-  value,
-  onChange,
-}: {
-  value: ProviderOutcome;
-  onChange: (value: ProviderOutcome) => void;
-}) {
-  const { t } = useI18n();
-  if (!appConfig.demoMode) return null;
-  return (
-    <Field label={t('demo.providerResponse')} hint={t('demo.providerHint')}>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value as ProviderOutcome)}
-      >
-        {providerOutcomes.map((outcome) => (
-          <option key={outcome} value={outcome}>
-            {t(`payments.outcomes.${outcome}`)}
-          </option>
-        ))}
-      </select>
-    </Field>
-  );
-}
-
 function PaymentStep({
   purpose,
   step,
@@ -889,6 +861,8 @@ function PaymentStep({
   status,
   done,
   locked = false,
+  unsupported = false,
+  pending = false,
   onPay,
 }: {
   purpose: PaymentPurpose;
@@ -898,11 +872,12 @@ function PaymentStep({
   status: string;
   done: boolean;
   locked?: boolean;
-  onPay: (methodId: string, outcome: ProviderOutcome) => Promise<ActionResult>;
+  unsupported?: boolean;
+  pending?: boolean;
+  onPay?: (methodId: string) => Promise<ActionResult>;
 }) {
   const { t, formatMoney } = useI18n();
   const [methodId, setMethodId] = useState('');
-  const [outcome, setOutcome] = useState<ProviderOutcome>('APPROVED');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
   return (
@@ -930,6 +905,16 @@ function PaymentStep({
               : 'checkout.rentalDone',
           )}
         </p>
+      ) : pending ? (
+        <p className="inline-status">
+          <CalendarClock aria-hidden="true" />
+          {t('checkout.providerPending')}
+        </p>
+      ) : unsupported ? (
+        <p className="inline-status">
+          <ShieldCheck aria-hidden="true" />
+          {t('common.backendGap')}
+        </p>
       ) : locked ? (
         <p className="inline-status">
           <ShieldCheck aria-hidden="true" />
@@ -943,14 +928,13 @@ function PaymentStep({
             onChange={setMethodId}
             name={`method-${purpose}`}
           />
-          <OutcomePicker value={outcome} onChange={setOutcome} />
           <Feedback result={result} />
           <Button
             size="lg"
             disabled={busy || !methodId}
             onClick={async () => {
               setBusy(true);
-              setResult(await onPay(methodId, outcome));
+              if (onPay) setResult(await onPay(methodId));
               setBusy(false);
             }}
           >
@@ -967,7 +951,7 @@ function PaymentStep({
 export function CheckoutPage() {
   const { t } = useI18n();
   const { id } = useParams();
-  const { state, payRental, holdGuarantee } = useDemo();
+  const { state, holdGuarantee } = useLendUp();
   const reservation = state.reservations.find((item) => item.id === id);
   if (!reservation)
     return (
@@ -982,6 +966,15 @@ export function CheckoutPage() {
   const rentalDone = !canRetryPayment(reservation.paymentStatus);
   const guaranteeDone =
     !requiresGuarantee || reservation.guaranteeStatus === 'HELD';
+  const checkoutLoan = state.loans.find(
+    (loan) => loan.reservationId === reservation.id,
+  );
+  const guaranteeSubmitted = state.transactions.some(
+    (transaction) =>
+      transaction.loanId === checkoutLoan?.id &&
+      transaction.type === 'GUARANTEE_HOLD' &&
+      ['PENDING', 'PROCESSING'].includes(transaction.status),
+  );
   const closed = reservation.status !== 'CONFIRMED';
 
   return (
@@ -1025,9 +1018,8 @@ export function CheckoutPage() {
                 amount={breakdown.guarantee}
                 status={reservation.guaranteeStatus}
                 done={guaranteeDone}
-                onPay={(method, outcome) =>
-                  holdGuarantee(reservation.id, method, outcome)
-                }
+                pending={guaranteeSubmitted}
+                onPay={(method) => holdGuarantee(reservation.id, method)}
               />
             )}
             <PaymentStep
@@ -1038,9 +1030,7 @@ export function CheckoutPage() {
               status={reservation.paymentStatus}
               done={rentalDone}
               locked={!guaranteeDone}
-              onPay={(method, outcome) =>
-                payRental(reservation.id, method, outcome)
-              }
+              unsupported
             />
             <div className="app-banner info">
               <ShieldCheck aria-hidden="true" />
@@ -1062,7 +1052,7 @@ export function DeliveryPage() {
   const { t } = useI18n();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { state, recordDelivery } = useDemo();
+  const { state, recordDelivery } = useLendUp();
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
@@ -1152,8 +1142,8 @@ export function DeliveryPage() {
             : t('delivery.confirmNoEvidence')
         }
         confirmLabel={t('delivery.confirm')}
-        onConfirm={() => {
-          const outcome = recordDelivery(reservation.id, evidence);
+        onConfirm={async () => {
+          const outcome = await recordDelivery(reservation.id, evidence);
           setResult(outcome);
           setConfirmOpen(false);
           if (outcome.ok && outcome.id) navigate(`/loans/${outcome.id}`);
@@ -1173,7 +1163,7 @@ const loanTabStatuses: Record<LoanTab, Loan['status'][]> = {
 
 export function LoansPage() {
   const { t, formatDateTime } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const mine = state.loans.filter(
     (loan) =>
       loan.borrowerId === state.currentUserId ||
@@ -1279,8 +1269,8 @@ type LoanDialog =
 export function LoanDetailPage() {
   const { t, formatDateTime, formatMoney } = useI18n();
   const { id } = useParams();
-  const demo = useDemo();
-  const { state } = demo;
+  const lendUp = useLendUp();
+  const { state } = lendUp;
   const methodLabel = usePaymentMethodLabel();
   const loan = state.loans.find((candidate) => candidate.id === id);
   const { analysis, run } = useEvidenceAnalysis(loan);
@@ -1351,14 +1341,14 @@ export function LoanDetailPage() {
   if (isBorrower && canChangeDates && !pendingExtension && !payableExtension)
     add(
       'extension',
-      <Button variant="outline" onClick={() => setDialog('extension')}>
+      <Button variant="outline" disabled title={t('common.backendGap')}>
         {t('loanDetail.actions.requestExtension')}
       </Button>,
     );
   if (isBorrower && payableExtension)
     add(
       'payExtension',
-      <Button onClick={() => setDialog('payExtension')}>
+      <Button disabled title={t('common.backendGap')}>
         {t('loanDetail.actions.payExtension', {
           amount: formatMoney(payableExtension.additionalCost),
         })}
@@ -1367,21 +1357,21 @@ export function LoanDetailPage() {
   if (isBorrower && pendingReschedule)
     add(
       'respondReschedule',
-      <Button onClick={() => setDialog('respondReschedule')}>
+      <Button disabled title={t('common.backendGap')}>
         {t('loanDetail.actions.reviewReschedule')}
       </Button>,
     );
   if (!isBorrower && pendingExtension)
     add(
       'respondExtension',
-      <Button onClick={() => setDialog('respondExtension')}>
+      <Button disabled title={t('common.backendGap')}>
         {t('loanDetail.actions.reviewExtension')}
       </Button>,
     );
   if (!isBorrower && canChangeDates && !pendingReschedule)
     add(
       'reschedule',
-      <Button variant="outline" onClick={() => setDialog('reschedule')}>
+      <Button variant="outline" disabled title={t('common.backendGap')}>
         {t('loanDetail.actions.proposeReschedule')}
       </Button>,
     );
@@ -1755,7 +1745,7 @@ function LoanDialogs({
   onDone: (result?: ActionResult) => void;
 }) {
   const { t, formatDateTime, formatMoney } = useI18n();
-  const demo = useDemo();
+  const lendUp = useLendUp();
   const suggested = useMemo(() => {
     const base = new Date(
       Math.max(new Date(loan.currentReturnAt).getTime(), Date.now()) +
@@ -1769,7 +1759,6 @@ function LoanDialogs({
   const [stars, setStars] = useState(0);
   const [comment, setComment] = useState('');
   const [methodId, setMethodId] = useState('');
-  const [outcome, setOutcome] = useState<ProviderOutcome>('APPROVED');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ActionResult | null>(null);
   const pendingExtension = loan.extensions.find(
@@ -1806,7 +1795,7 @@ function LoanDialogs({
           title={t('loanDialogs.receipt.title')}
           description={t('loanDialogs.receipt.description')}
           confirmLabel={t('loanDialogs.receipt.confirm')}
-          onConfirm={() => finish(demo.confirmReceipt(loan.id))}
+          onConfirm={async () => finish(await lendUp.confirmReceipt(loan.id))}
         >
           <EvidenceGallery
             title={t('evidence.initial')}
@@ -1850,11 +1839,11 @@ function LoanDialogs({
               : 'loanDialogs.reschedule.confirm',
           )}
           disabled={!validDate}
-          onConfirm={() =>
+          onConfirm={async () =>
             finish(
-              extension
-                ? demo.requestExtension(loan.id, dateIso)
-                : demo.proposeReschedule(loan.id, dateIso),
+              await (extension
+                ? lendUp.requestExtension(loan.id, dateIso)
+                : lendUp.proposeReschedule(loan.id, dateIso)),
             )
           }
         >
@@ -1898,11 +1887,11 @@ function LoanDialogs({
       const isExtension = dialog === 'respondExtension';
       const item = isExtension ? pendingExtension : pendingReschedule;
       if (!item) return null;
-      const respond = (accepted: boolean) =>
+      const respond = async (accepted: boolean) =>
         finish(
-          isExtension
-            ? demo.respondExtension(loan.id, accepted)
-            : demo.respondReschedule(loan.id, accepted),
+          await (isExtension
+            ? lendUp.respondExtension(loan.id, accepted)
+            : lendUp.respondReschedule(loan.id, accepted)),
         );
       return (
         <ConfirmDialog
@@ -1974,7 +1963,7 @@ function LoanDialogs({
           busy={busy}
           onConfirm={async () => {
             setBusy(true);
-            const result = await demo.payExtension(loan.id, methodId, outcome);
+            const result = await lendUp.payExtension(loan.id, methodId);
             setBusy(false);
             finish(result);
           }}
@@ -1985,7 +1974,6 @@ function LoanDialogs({
             onChange={setMethodId}
             name="extension-method"
           />
-          <OutcomePicker value={outcome} onChange={setOutcome} />
           <Feedback result={error} />
         </ConfirmDialog>
       );
@@ -2003,9 +1991,14 @@ function LoanDialogs({
           description={t('loanDialogs.return.description')}
           confirmLabel={t('loanDialogs.return.confirm')}
           disabled={notes.trim().length < 10 || !evidence.length}
-          onConfirm={() =>
+          onConfirm={async () =>
             finish(
-              demo.recordReturn(loan.id, dialog === 'early', notes, evidence),
+              await lendUp.recordReturn(
+                loan.id,
+                dialog === 'early',
+                notes,
+                evidence,
+              ),
             )
           }
         >
@@ -2044,7 +2037,7 @@ function LoanDialogs({
           title={t('loanDialogs.confirmReturn.title')}
           description={t('loanDialogs.confirmReturn.description')}
           confirmLabel={t('loanDialogs.confirmReturn.confirm')}
-          onConfirm={() => finish(demo.confirmReturn(loan.id))}
+          onConfirm={async () => finish(await lendUp.confirmReturn(loan.id))}
         >
           <EvidenceGallery
             title={t('evidence.final')}
@@ -2068,7 +2061,9 @@ function LoanDialogs({
           description={t('loanDialogs.rating.description')}
           confirmLabel={t('loanDialogs.rating.confirm')}
           disabled={stars < 1}
-          onConfirm={() => finish(demo.rateLoan(loan.id, stars, comment))}
+          onConfirm={async () =>
+            finish(await lendUp.rateLoan(loan.id, stars, comment))
+          }
         >
           <fieldset className="rating-input">
             <legend>{t('loanDialogs.rating.stars')}</legend>

@@ -12,43 +12,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Feedback } from '@/components/lendup/shared';
-import { appConfig } from '@/config/app-config';
 import { useI18n } from '@/lib/i18n';
-import { useDemo, type ActionResult } from '@/stores/demo-store';
-
-const sections = [
-  'service',
-  'accounts',
-  'listings',
-  'economics',
-  'cancellations',
-  'evidence',
-  'privacy',
-  'conduct',
-] as const;
+import { useLendUp, type ActionResult } from '@/hooks/use-lendup';
 
 export function TermsDocument() {
-  const { t, formatDate } = useI18n();
+  const { t } = useI18n();
   return (
     <article className="terms-document">
-      <p className="muted">
-        {t('terms.version', {
-          version: appConfig.termsVersion,
-          date: formatDate(appConfig.termsPublishedAt),
-        })}
-      </p>
-      {sections.map((section, index) => (
-        <section key={section}>
-          <h2>
-            {index + 1}. {t(`terms.sections.${section}.title`)}
-          </h2>
-          <p>{t(`terms.sections.${section}.body`)}</p>
-        </section>
-      ))}
       <aside className="legal-note">
         <ShieldAlert aria-hidden="true" />
         <div>
-          <h2>{t('terms.disclaimer.title')}</h2>
+          <h2>{t('common.backendGap')}</h2>
           <p>{t('terms.disclaimer.body')}</p>
         </div>
       </aside>
@@ -58,7 +32,7 @@ export function TermsDocument() {
 
 export function TermsAcceptance({ onAccepted }: { onAccepted?: () => void }) {
   const { t } = useI18n();
-  const { acceptTerms } = useDemo();
+  const { acceptTerms, termsAvailable } = useLendUp();
   const [checked, setChecked] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
   return (
@@ -67,21 +41,25 @@ export function TermsAcceptance({ onAccepted }: { onAccepted?: () => void }) {
         <input
           type="checkbox"
           checked={checked}
+          disabled={!termsAvailable}
           onChange={(event) => setChecked(event.target.checked)}
         />
         {t('terms.acceptLabel')}
       </label>
       <Button
         type="button"
-        disabled={!checked}
-        onClick={() => {
-          const outcome = acceptTerms();
+        disabled={!checked || !termsAvailable}
+        onClick={async () => {
+          const outcome = await acceptTerms();
           setResult(outcome);
           if (outcome.ok) onAccepted?.();
         }}
       >
         {t('terms.accept')}
       </Button>
+      {!termsAvailable && (
+        <p className="muted small">{t('common.backendGap')}</p>
+      )}
       <Feedback result={result && !result.ok ? result : null} />
     </div>
   );

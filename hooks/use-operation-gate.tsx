@@ -3,11 +3,11 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TermsDialog } from '@/components/lendup/terms';
-import { useDemo } from '@/stores/demo-store';
+import { useLendUp } from '@/hooks/use-lendup';
 import { currentUserOf, termsAcceptedBy } from '@/stores/selectors';
 
 export function useOperationGate() {
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const pending = useRef<(() => void) | null>(null);

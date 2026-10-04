@@ -1,27 +1,39 @@
 'use client';
 
-import {
-  geminiAdapter,
-  type AnalysisOutcome,
-} from '@/services/adapters/gemini';
-import { useDemo } from '@/stores/demo-store';
-import type { Loan } from '@/types/domain';
+import { useState } from 'react';
+import { evidenceService } from '@/services/evidence.service';
+import type { EvidenceAnalysis, Loan } from '@/types/domain';
 
 export function useEvidenceAnalysis(loan: Loan | undefined) {
-  const { state, saveAnalysis } = useDemo();
-  const analysis = loan
-    ? state.analyses.find((candidate) => candidate.loanId === loan.id)
-    : undefined;
+  const [analysis, setAnalysis] = useState<EvidenceAnalysis>();
 
-  const run = async (outcome: AnalysisOutcome) => {
+  const run = async () => {
     if (!loan) return;
-    saveAnalysis({
-      id: `analysis-${loan.id}`,
+    const initial = loan.evidence.find((item) => item.phase === 'INITIAL');
+    const final = loan.evidence.find((item) => item.phase === 'FINAL');
+    if (!initial || !final) return;
+    setAnalysis({
+      id: '',
       loanId: loan.id,
       status: 'ANALYZING',
       updatedAt: new Date().toISOString(),
     });
-    saveAnalysis(await geminiAdapter.compare(loan.id, loan.evidence, outcome));
+    try {
+      const row = await evidenceService.analyze(loan.id, initial.id, final.id);
+      setAnalysis({
+        id: String(row.id ?? ''),
+        loanId: loan.id,
+        status: String(row.estado) === 'PENDIENTE' ? 'ANALYZING' : 'SUCCESS',
+        updatedAt: String(row.solicitado_en ?? new Date().toISOString()),
+      });
+    } catch {
+      setAnalysis({
+        id: '',
+        loanId: loan.id,
+        status: 'ERROR',
+        updatedAt: new Date().toISOString(),
+      });
+    }
   };
 
   return { analysis, run };

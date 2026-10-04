@@ -13,6 +13,10 @@ export const es = {
     processing: 'Procesando…',
     loading: 'Cargando información',
     pending: 'Pendiente',
+    requestFailed:
+      'La operación no pudo completarse con el backend. Revisa los datos e inténtalo nuevamente.',
+    backendGap:
+      'Esta capacidad todavía no está disponible en la API de LendUp.',
     selectOption: 'Selecciona una opción',
     saveChanges: 'Guardar cambios',
     viewDetail: 'Ver detalle',
@@ -71,27 +75,17 @@ export const es = {
   },
   banners: {
     verification:
-      'Verifica tu correo institucional para publicar objetos y solicitar préstamos.',
-    verificationAction: 'Verificar ahora',
+      'Solicita la verificación de tu condición de estudiante para publicar objetos y solicitar préstamos.',
+    verificationAction: 'Solicitar verificación',
     terms:
       'Antes de tu primera operación debes revisar y aceptar los términos y condiciones.',
     termsAction: 'Revisar términos',
-  },
-  demo: {
-    title: 'Entorno de demostración',
-    viewAs: 'Ver como',
-    reset: 'Reiniciar demo',
-    quickAccess: 'Cuentas de demostración',
-    passwordHint: 'Todas las cuentas usan la contraseña {password}.',
-    providerResponse: 'Respuesta simulada del proveedor',
-    providerHint:
-      'Solo en modo demo: elige cómo responderá el proveedor externo.',
   },
   auth: {
     hero: {
       title:
         'Préstamos entre estudiantes, con reglas claras y garantía protegida.',
-      point1: 'Solo estudiantes verificados con correo institucional.',
+      point1: 'Acceso con correo institucional y verificación estudiantil.',
       point2: 'Condiciones, tarifa y garantía congeladas en cada reserva.',
       point3: 'Evidencias del estado del objeto antes y después del préstamo.',
     },
@@ -106,7 +100,7 @@ export const es = {
     register: {
       title: 'Crea tu cuenta universitaria',
       description:
-        'Usaremos tu correo institucional para verificar que perteneces a tu comunidad universitaria.',
+        'Tu correo institucional será la identidad de acceso asociada a tu perfil universitario.',
       cta: 'Crear cuenta',
       submit: 'Crear mi cuenta',
       submitting: 'Creando cuenta…',
@@ -119,34 +113,34 @@ export const es = {
       haveAccount: '¿Ya tienes cuenta?',
       successTitle: '¡Tu cuenta fue creada!',
       successNext:
-        'El siguiente paso es verificar tu correo institucional para poder publicar y solicitar objetos.',
+        'El siguiente paso es solicitar la verificación de tu condición de estudiante para poder publicar y solicitar objetos.',
     },
     verify: {
-      title: 'Verifica tu correo institucional',
-      description: 'Enviaremos un enlace de verificación a {email}.',
-      send: 'Enviar enlace de verificación',
-      resend: 'Reenviar enlace',
-      sending: 'Enviando…',
+      title: 'Solicita la verificación estudiantil',
+      description:
+        'Tu cuenta usa el correo institucional {email}. Registra una referencia válida para que el backend procese la verificación.',
+      referenceLabel: 'Referencia de verificación',
+      referenceHint:
+        'Usa la referencia solicitada por tu institución, por ejemplo el código de tu carnet universitario.',
+      referencePlaceholder: 'Código o referencia institucional',
+      send: 'Solicitar verificación',
+      resend: 'Actualizar solicitud',
       continue: 'Continuar',
       later: 'Hacerlo más tarde',
-      demoHint:
-        'Simula lo que ocurre cuando abres el enlace recibido en tu correo.',
-      simulateSuccess: 'Simular enlace válido',
-      simulateError: 'Simular enlace inválido',
       messages: {
+        UNVERIFIED:
+          'Tu condición de estudiante aún no está verificada. Registra la referencia requerida para solicitar la validación.',
         PENDING:
-          'Aún no verificaste tu correo. Solicita el enlace para iniciar la validación.',
-        SENDING: 'Estamos enviando el enlace a tu correo institucional.',
-        SENT: 'Te enviamos un enlace. Ábrelo desde tu correo institucional para completar la verificación.',
+          'Tu solicitud está registrada y el backend la mantiene pendiente de revisión.',
         VERIFIED:
           'Tu condición de estudiante está verificada. Ya puedes operar en LendUp.',
-        ERROR:
-          'No pudimos completar la verificación. Tu cuenta sigue sin verificar; solicita un nuevo enlace.',
       },
     },
     errors: {
       USER_NOT_FOUND: 'No existe una cuenta con ese correo.',
       INVALID_CREDENTIALS: 'El correo o la contraseña no son válidos.',
+      SESSION_EMAIL_MISMATCH:
+        'La sesión de Firebase abierta pertenece a otro correo. Cierra sesión antes de registrar esta cuenta.',
       ACCOUNT_SUSPENDED:
         'Esta cuenta está suspendida. Comunícate con el equipo de LendUp.',
       EMAIL_TAKEN: 'Ya existe una cuenta registrada con ese correo.',
@@ -301,11 +295,9 @@ export const es = {
       ARCHIVED: 'Dado de baja',
     },
     verification: {
-      PENDING: 'Sin verificar',
-      SENDING: 'Enviando enlace',
-      SENT: 'Enlace enviado',
+      UNVERIFIED: 'Sin verificar',
+      PENDING: 'Verificación pendiente',
       VERIFIED: 'Verificado',
-      ERROR: 'Verificación fallida',
     },
   },
   reputation: {
@@ -372,10 +364,11 @@ export const es = {
   request: {
     dialogTitle: 'Revisa antes de solicitar',
     dialogDescription: 'Solicitud de préstamo para {title}',
-    periodAvailable: 'El periodo está disponible.',
+    periodValidation:
+      'El backend validará el periodo al enviar la solicitud porque la disponibilidad existente no está expuesta por la API.',
     reviewTitle: 'Condiciones definidas por el prestamista',
     paymentLater:
-      'No se realizará ningún cobro ahora. El pago y la garantía se procesan con el proveedor externo solo si la solicitud es aceptada.',
+      'No se realizará ningún cobro ahora. El monto mostrado es preliminar; el backend aún no ofrece una cotización total autoritativa ni confirmación real del proveedor.',
     messageLabel: 'Mensaje para el prestamista (opcional)',
     messageHint: 'Cuéntale para qué lo necesitas. Máximo 280 caracteres.',
     acceptConditions:
@@ -387,6 +380,9 @@ export const es = {
     title: 'Mis objetos',
     description:
       'Administra tus publicaciones, su disponibilidad y las solicitudes que recibes.',
+    activeOnly:
+      'El backend solo permite consultar publicaciones activas. Las publicaciones pausadas o dadas de baja no pueden recuperarse en esta vista.',
+    noActiveTitle: 'No hay publicaciones activas visibles',
     publish: 'Publicar objeto',
     publishFirst: 'Publicar mi primer objeto',
     edit: 'Editar',
@@ -397,9 +393,6 @@ export const es = {
     reviewRequests: 'Revisar solicitudes',
     pendingRequests: 'Solicitudes',
     upcomingReservations: 'Reservas',
-    emptyTitle: 'Aún no publicas objetos',
-    emptyDescription:
-      'Publica algo que no uses a diario y empieza a recibir solicitudes de tu comunidad.',
     archiveTitle: 'Dar de baja la publicación',
     archiveDescription:
       '“{title}” dejará de recibir solicitudes y no podrá reactivarse. Las reservas confirmadas y el historial se conservan.',
@@ -425,38 +418,22 @@ export const es = {
       'Incluye accesorios, estado de funcionamiento y cualquier detalle relevante.',
     exchangeHint:
       'Un punto público y fácil de encontrar dentro o cerca del campus.',
-    photosTitle: 'Agrega fotos claras del objeto',
-    photosHint:
-      'La primera foto será la portada. JPG o PNG de hasta {size} MB cada una.',
-    cover: 'Portada',
+    photosTitle: 'Carga de fotografías no disponible',
     conditionsHint:
       'Estas condiciones se mostrarán antes de que un estudiante envíe su solicitud.',
     rateHint: 'Se cobra por cada bloque iniciado de 24 horas.',
     guaranteeHint:
       'Déjalo en 0 si no requieres garantía. Se devuelve al finalizar sin incidencias.',
-    publish: 'Publicar y definir disponibilidad',
+    publish: 'Publicar objeto',
     save: 'Guardar cambios',
   },
   availability: {
     eyebrow: 'Disponibilidad',
     back: 'Volver a mis objetos',
     description:
-      'Define los periodos en los que se puede solicitar tu objeto. Los periodos reservados permanecen bloqueados.',
-    published:
-      'Tu objeto fue publicado. Agrega sus periodos disponibles para empezar a recibir solicitudes.',
-    addWindow: 'Agregar periodo',
-    editWindow: 'Editar periodo',
-    add: 'Agregar periodo',
-    update: 'Actualizar periodo',
-    save: 'Guardar disponibilidad',
-    unsaved: 'Tienes cambios sin guardar.',
-    windows: 'Periodos disponibles',
-    noWindows: 'Aún no agregaste periodos disponibles.',
-    reserved: 'Periodos reservados',
-    noReserved: 'No hay reservas que bloqueen el calendario.',
-    pastRange: 'El periodo debe terminar en el futuro.',
-    editAria: 'Editar periodo',
-    removeAria: 'Eliminar periodo',
+      'La disponibilidad debe provenir del backend y conservar los periodos ya registrados y reservados.',
+    backendGap:
+      'El backend permite agregar un intervalo, pero no permite consultar, editar ni eliminar la disponibilidad existente. La gestión queda deshabilitada para evitar sobrescribir o duplicar periodos sin información autoritativa.',
   },
   requests: {
     eyebrow: 'Solicitudes',
@@ -589,7 +566,7 @@ export const es = {
   payments: {
     chooseMethod: 'Medio de pago',
     noMethods:
-      'El proveedor de pagos no devolvió medios disponibles. Inténtalo más tarde.',
+      'No hay medios de pago habilitados. La integración con el proveedor sigue pendiente en el backend.',
     methods: {
       CARD: 'Tarjeta de crédito o débito',
       WALLET: 'Billetera digital',
@@ -598,15 +575,9 @@ export const es = {
     },
     methodHints: {
       CARD: 'Visa, Mastercard o American Express',
-      WALLET: 'Pago inmediato desde tu celular',
+      WALLET: 'Operación gestionada por el proveedor externo',
       ACCOUNT_MONEY: 'Saldo disponible en tu cuenta',
       CASH: 'Código para pagar en agentes o banca',
-    },
-    outcomes: {
-      APPROVED: 'Aprobado',
-      REJECTED: 'Rechazado',
-      CANCELLED: 'Cancelado por el usuario',
-      ERROR: 'Error del proveedor',
     },
   },
   checkout: {
@@ -624,6 +595,8 @@ export const es = {
     rentalDone: 'Pago de la tarifa aprobado.',
     payWithProvider: 'Pagar {amount} con Mercado Pago',
     processing: 'Procesando con el proveedor…',
+    providerPending:
+      'La operación fue registrada y permanece pendiente de confirmación del proveedor.',
     allDone:
       'Listo: el pago y la garantía están confirmados. El prestamista ya puede registrar la entrega.',
     security:
@@ -835,13 +808,9 @@ export const es = {
     types: { PHOTO: 'Foto', VIDEO: 'Video', NOTE: 'Nota' },
   },
   uploads: {
-    hint: 'Imágenes o videos de hasta {size} MB cada uno.',
-    select: 'Seleccionar archivos',
-    uploading: 'Subiendo…',
     errors: {
-      FILE_TOO_LARGE: 'El archivo {name} supera el límite de {size} MB.',
-      UNSUPPORTED_TYPE: 'El formato de {name} no está permitido.',
-      READ_ERROR: 'No se pudo leer el archivo {name}.',
+      NOT_CONFIGURED:
+        'La carga de archivos aún no está disponible porque Cloudinary no forma parte del contrato backend vigente.',
     },
   },
   analysis: {
@@ -901,6 +870,8 @@ export const es = {
     },
   },
   incidents: {
+    listGap:
+      'El backend no ofrece una lista de incidencias para estudiantes. Puedes reportar una incidencia y abrir su detalle inmediato, pero no se mostrará un historial inventado.',
     eyebrow: 'Confianza y seguridad',
     title: 'Incidencias',
     description:
@@ -945,6 +916,8 @@ export const es = {
     saveStatement: 'Guardar declaración',
   },
   admin: {
+    loanDataGap:
+      'El backend permite listar esta incidencia, pero no entrega al administrador el préstamo ni el saldo de garantía asociado. La resolución permanece bloqueada hasta contar con esos datos autoritativos.',
     eyebrow: 'Administración',
     title: 'Bandeja de incidencias',
     description:
@@ -1300,7 +1273,7 @@ export const es = {
     phoneHint:
       'Solo se comparte con tu contraparte durante una reserva o préstamo vigente.',
     readonlyNote:
-      'Tu nombre, universidad y correo institucional no se pueden modificar porque respaldan tu verificación.',
+      'Tu nombre, universidad y correo institucional no se pueden modificar desde este formulario porque identifican tu perfil en el backend.',
     cycle: 'ciclo {cycle}',
     verified: 'Estudiante verificado',
     notVerified: 'Verificación pendiente',
@@ -1330,43 +1303,7 @@ export const es = {
     title: 'Términos y condiciones de LendUp',
     description:
       'Reglas para prestar y solicitar objetos dentro de la comunidad universitaria.',
-    version: 'Versión {version} · publicada el {date}',
-    sections: {
-      service: {
-        title: 'Objeto del servicio',
-        body: 'LendUp es una plataforma que conecta a estudiantes universitarios para el préstamo temporal y pagado de objetos. LendUp no es propietario de los objetos ni participa en su uso.',
-      },
-      accounts: {
-        title: 'Cuentas y verificación',
-        body: 'Solo pueden operar estudiantes con correo institucional verificado. Cada persona es responsable de la veracidad de sus datos y de la confidencialidad de su contraseña.',
-      },
-      listings: {
-        title: 'Publicaciones y condiciones',
-        body: 'El prestamista define la tarifa diaria, la garantía, las condiciones de uso, entrega, devolución y cancelación, y el lugar de intercambio. Al confirmarse una reserva, estas condiciones quedan registradas y no cambian aunque se edite la publicación.',
-      },
-      economics: {
-        title: 'Tarifas, comisión y garantía',
-        body: 'La tarifa se calcula por bloques iniciados de 24 horas. LendUp cobra una comisión por operación que se muestra antes de pagar. Los pagos y garantías se procesan mediante Mercado Pago; LendUp no almacena datos completos de tarjetas.',
-      },
-      cancellations: {
-        title: 'Cancelaciones y reembolsos',
-        body: 'Una reserva puede cancelarse antes de la entrega del objeto. Si el prestamista cancela, se reembolsa el total de la tarifa y la garantía. Si cancela el prestatario, se aplican las condiciones de cancelación aceptadas. Una devolución anticipada no genera reembolso proporcional.',
-      },
-      evidence: {
-        title: 'Evidencias e incidencias',
-        body: 'Las partes pueden registrar fotos, videos y notas del estado del objeto. El análisis con inteligencia artificial es solo informativo. Las incidencias son revisadas por el equipo de LendUp, que decide si corresponde afectar la garantía.',
-      },
-      privacy: {
-        title: 'Datos personales',
-        body: 'Tu teléfono solo se comparte con tu contraparte mientras exista una reserva confirmada o un préstamo vigente. Tu ubicación actual solo se usa para ordenar resultados y no se guarda.',
-      },
-      conduct: {
-        title: 'Conducta y suspensión',
-        body: 'Se espera un trato respetuoso y el cuidado de los objetos. LendUp puede suspender cuentas ante incumplimientos graves o reiterados.',
-      },
-    },
     disclaimer: {
-      title: 'Descargo de responsabilidad',
       body: 'LendUp facilita el acuerdo entre estudiantes, pero no garantiza el estado ni el funcionamiento de los objetos. Revisa el objeto al recibirlo y documenta su estado con evidencias.',
     },
     acceptLabel:
@@ -1386,6 +1323,17 @@ export const es = {
     open: 'Abrir en Google Maps',
     embedTitle: 'Mapa de {place}',
   },
+  httpErrors: {
+    BAD_REQUEST: 'La solicitud no es válida.',
+    UNAUTHENTICATED: 'La sesión expiró. Vuelve a iniciar sesión.',
+    FORBIDDEN: 'No tienes autorización para realizar esta operación.',
+    NOT_FOUND: 'El recurso solicitado no existe.',
+    CONFLICT: 'La operación entra en conflicto con el estado actual.',
+    VALIDATION_ERROR: 'Revisa los datos enviados.',
+    SERVER_ERROR: 'El backend no pudo completar la operación.',
+    NETWORK_ERROR: 'No fue posible conectar con el backend.',
+    UNKNOWN: 'Ocurrió un error inesperado en la solicitud.',
+  },
   errors: {
     notFound: {
       title: 'Página no encontrada',
@@ -1399,9 +1347,7 @@ export const es = {
       registered: 'Cuenta creada correctamente.',
     },
     verification: {
-      sent: 'Te enviamos un enlace de verificación.',
-      verified: '¡Listo! Tu correo institucional fue verificado.',
-      failed: 'El enlace no es válido o expiró. Tu cuenta sigue sin verificar.',
+      sent: 'La solicitud de verificación quedó registrada y está pendiente.',
       notAllowed: 'No es posible verificar esta cuenta.',
     },
     profile: { saved: 'Perfil actualizado correctamente.' },
@@ -1411,7 +1357,7 @@ export const es = {
     },
     gate: {
       verificationRequired:
-        'Verifica tu correo institucional antes de realizar esta operación.',
+        'Completa la verificación de estudiante antes de realizar esta operación.',
       termsRequired:
         'Acepta los términos y condiciones antes de realizar esta operación.',
       forbidden: 'No tienes permiso para realizar esta acción.',
@@ -1420,18 +1366,6 @@ export const es = {
       published: 'Objeto publicado.',
       updated:
         'Publicación actualizada. Los cambios aplican a nuevas solicitudes.',
-      paused: 'Publicación pausada: no recibirá nuevas solicitudes.',
-      reactivated: 'Publicación reactivada.',
-      archived: 'Publicación dada de baja. Se conservó su historial.',
-      archivedLocked: 'Una publicación dada de baja no puede modificarse.',
-      invalidRate: 'La tarifa diaria debe ser mayor que cero.',
-    },
-    availability: {
-      saved: 'Disponibilidad guardada.',
-      invalidRange: 'Cada periodo debe terminar después de iniciar.',
-      overlapsReservation:
-        'El periodo se superpone con una reserva confirmada.',
-      overlapsItself: 'El periodo se superpone con otro periodo disponible.',
     },
     request: {
       created:
@@ -1445,8 +1379,6 @@ export const es = {
       ownListing: 'No puedes solicitar tu propio objeto.',
       invalidRange: 'La fecha final debe ser posterior a la inicial.',
       pastStart: 'El periodo debe comenzar en el futuro.',
-      periodUnavailable:
-        'El periodo seleccionado no está dentro de la disponibilidad publicada.',
       periodTaken: 'Ese periodo ya fue reservado por otra solicitud.',
     },
     reservation: {
@@ -1457,18 +1389,8 @@ export const es = {
       reasonRequired: 'Indica el motivo de la cancelación.',
     },
     payment: {
-      approved: 'Pago aprobado por el proveedor.',
-      guaranteeHeld: 'Garantía constituida correctamente.',
-      alreadyPaid: 'Este pago ya fue procesado.',
-      guaranteeFirst:
-        'Primero constituye la garantía monetaria; luego podrás pagar la tarifa.',
-      guaranteeAlreadyHeld: 'La garantía ya fue constituida.',
-      REJECTED:
-        'El proveedor rechazó la operación. Prueba con otro medio de pago.',
-      CANCELLED: 'La operación fue cancelada. No se realizó ningún cobro.',
-      ERROR:
-        'El proveedor presentó un error. La operación sigue pendiente; puedes reintentar.',
-      APPROVED: 'Pago aprobado por el proveedor.',
+      guaranteePending:
+        'La solicitud de garantía fue registrada y permanece pendiente de confirmación.',
     },
     delivery: {
       recorded:

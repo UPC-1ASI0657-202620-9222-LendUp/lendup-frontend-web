@@ -1,5 +1,7 @@
 # Matriz de trazabilidad frontend de LendUp
 
+> Matriz histórica del frontend demo. Los estados `COMPLETE` de esta tabla no certifican integración productiva. El estado vigente y los bloqueos reales están documentados en `FRONTEND_BACKEND_INTEGRATION_CONTRACTS.md` y `README.md`.
+
 Estados: `COMPLETE` y `FRONTEND_COMPLETE_BACKEND_REQUIRED` (UI completa que depende de un servicio real detrás del API Gateway o de un adapter externo).
 
 | RF   | Descripción                 | Responsabilidad frontend                                             | Ruta(s)                       | Componente                    | Servicio / adapter              | Estado                             | Dependencia backend     | Notas                                |

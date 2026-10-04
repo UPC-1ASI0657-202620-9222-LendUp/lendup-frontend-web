@@ -1,5 +1,7 @@
 # Trazabilidad de User Stories (frontend)
 
+> Matriz histórica del frontend demo. No debe usarse como evidencia de que un flujo externo o backend está operativo. Consulta `FRONTEND_BACKEND_INTEGRATION_CONTRACTS.md` y `README.md` para el estado productivo vigente.
+
 Matriz de las User Stories oficiales `US01`–`US47` del informe de LendUp. Estados: `COMPLETE` (flujo completo en el frontend con el backend demo) y `FRONTEND_COMPLETE_BACKEND_REQUIRED` (la UI está completa y depende de un servicio externo real: Firebase Auth, Mercado Pago, Cloudinary, Gemini o el API Gateway).
 
 La columna **Verificación** indica `flow` cuando la historia está cubierta por `npm run qa:flows` (Playwright) y `visual` cuando se validó con `npm run qa:browser` en escritorio, tablet y móvil.

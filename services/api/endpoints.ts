@@ -8,6 +8,7 @@ export const endpoints = {
       method: 'POST',
       path: '/estudiantes/me/aceptacion-terminos',
     },
+    student: { method: 'GET', path: '/estudiantes/{id}' },
   },
   catalog: {
     create: { method: 'POST', path: '/objetos' },
@@ -16,11 +17,17 @@ export const endpoints = {
     availability: { method: 'PUT', path: '/objetos/{id}/disponibilidad' },
     search: { method: 'GET', path: '/objetos' },
     detail: { method: 'GET', path: '/objetos/{id}' },
+    terms: { method: 'GET', path: '/terminos' },
   },
-  reservations: {
+  requests: {
     createRequest: { method: 'POST', path: '/solicitudes' },
+    list: { method: 'GET', path: '/solicitudes' },
+    detail: { method: 'GET', path: '/solicitudes/{id}' },
     acceptRequest: { method: 'POST', path: '/solicitudes/{id}/aceptacion' },
     rejectRequest: { method: 'POST', path: '/solicitudes/{id}/rechazo' },
+    cancelRequest: { method: 'POST', path: '/solicitudes/{id}/cancelacion' },
+  },
+  reservations: {
     list: { method: 'GET', path: '/reservas' },
     cancel: { method: 'POST', path: '/reservas/{id}/cancelacion' },
     contact: { method: 'GET', path: '/reservas/{id}/contacto' },
@@ -31,7 +38,7 @@ export const endpoints = {
     extensions: { method: 'POST', path: '/prestamos/{id}/extensiones' },
     extensionResponse: {
       method: 'POST',
-      path: '/prestamos/{id}/extensiones/{extId}/respuesta',
+      path: '/prestamos/{id}/extensiones/{subid}/respuesta',
     },
     reschedules: { method: 'POST', path: '/prestamos/{id}/reprogramaciones' },
     returnRecord: { method: 'POST', path: '/prestamos/{id}/devolucion' },
@@ -41,6 +48,16 @@ export const endpoints = {
     },
     list: { method: 'GET', path: '/prestamos' },
     calendar: { method: 'GET', path: '/calendario' },
+    detail: { method: 'GET', path: '/prestamos/{id}' },
+    extensionQuote: {
+      method: 'POST',
+      path: '/prestamos/{id}/extensiones/cotizacion',
+    },
+    rescheduleResponse: {
+      method: 'POST',
+      path: '/prestamos/{id}/reprogramaciones/{subid}/respuesta',
+    },
+    paymentQuote: { method: 'GET', path: '/prestamos/{id}/cotizacion-pago' },
   },
   evidence: {
     upload: { method: 'POST', path: '/prestamos/{id}/evidencias' },
@@ -66,6 +83,9 @@ export const endpoints = {
   notifications: {
     list: { method: 'GET', path: '/notificaciones' },
     markRead: { method: 'PATCH', path: '/notificaciones/{id}' },
+  },
+  webhooks: {
+    mercadoPago: { method: 'POST', path: '/webhooks/mercado-pago' },
   },
 } as const;
 

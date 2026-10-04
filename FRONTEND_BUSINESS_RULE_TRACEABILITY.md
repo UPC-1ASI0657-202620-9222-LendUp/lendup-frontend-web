@@ -1,5 +1,7 @@
 # Trazabilidad de reglas de negocio frontend
 
+> Documento histórico previo a la integración productiva. No representa las capacidades activas del backend. Consulta `FRONTEND_BACKEND_INTEGRATION_CONTRACTS.md` y `README.md` para el estado vigente; cualquier regla que dependa de datos no expuestos permanece deshabilitada.
+
 Las funciones puras están en `lib/business-rules.ts` y se prueban en `tests/business-rules.test.ts` (`npm test`).
 
 | Regla       | Implementación                                                                         | Estado/modelo                               | Componentes                    | Tests                   | RF               | Nota                                   |

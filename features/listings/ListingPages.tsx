@@ -18,7 +18,6 @@ import {
   Check,
   CheckCircle2,
   Edit3,
-  ImagePlus,
   LocateFixed,
   Pause,
   Play,
@@ -28,7 +27,6 @@ import {
   SlidersHorizontal,
   Trash2,
   TriangleAlert,
-  Upload,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -56,17 +54,9 @@ import {
   UserChip,
 } from '@/components/lendup/shared';
 import { ConfirmDialog, Field } from '@/components/lendup/forms';
-import {
-  addDays,
-  atZonedTime,
-  fromZonedInput,
-  today,
-  toZonedInput,
-} from '@/lib/dates';
+import { fromZonedInput, toZonedInput } from '@/lib/dates';
 import { useOperationGate } from '@/hooks/use-operation-gate';
 import { useI18n } from '@/lib/i18n';
-import { isPeriodAvailable, overlaps } from '@/lib/business-rules';
-import { cloudinaryAdapter, UploadError } from '@/services/adapters/cloudinary';
 import { googleMapsAdapter } from '@/services/adapters/google-maps';
 import {
   campusCoordinates,
@@ -78,7 +68,7 @@ import {
   type ListingFilters,
 } from '@/services/catalog.service';
 import { quoteListing } from '@/services/payments.service';
-import { useDemo, type ActionResult } from '@/stores/demo-store';
+import { useLendUp, type ActionResult } from '@/hooks/use-lendup';
 import {
   currentUserOf,
   pendingRequestsFor,
@@ -86,17 +76,15 @@ import {
   userById,
 } from '@/stores/selectors';
 import type {
-  AvailabilitySlot,
   CategoryCode,
   ConditionCode,
   Coordinates,
-  ListingMedia,
   ListingStatus,
 } from '@/types/domain';
 
 export function ExplorePage() {
   const { t } = useI18n();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const [params] = useSearchParams();
   const [filters, setFilters] = useState<ListingFilters>({
     ...emptyListingFilters,
@@ -318,7 +306,7 @@ export function ExplorePage() {
 export function ObjectDetailPage() {
   const { t, formatMoney, formatDateTime } = useI18n();
   const { id } = useParams();
-  const { state } = useDemo();
+  const { state } = useLendUp();
   const [open, setOpen] = useState(false);
   const [activeImage, setActiveImage] = useState(0);
   const { guard, dialog } = useOperationGate();
@@ -529,7 +517,7 @@ function RequestDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useI18n();
-  const { state, createRequest } = useDemo();
+  const { state, createRequest } = useLendUp();
   const navigate = useNavigate();
   const item = state.listings.find((listing) => listing.id === listingId);
   const firstWindow = item?.availabilitySlots.find(
@@ -558,21 +546,18 @@ function RequestDialog({
     startIso && endIso && new Date(endIso) > new Date(startIso),
   );
   const future = Boolean(startIso && new Date(startIso) > new Date());
-  const available =
-    validRange &&
-    future &&
-    isPeriodAvailable(item.availabilitySlots, startIso, endIso);
+  // Availability windows are not exposed by the current detail response.
+  // The backend validates the selected period authoritatively on submission.
+  const canSubmit = validRange && future;
   const breakdown = validRange ? quoteListing(item, startIso, endIso) : null;
   const availabilityMessage = !validRange
     ? t('validation.endAfterStart')
     : !future
       ? t('results.request.pastStart')
-      : available
-        ? t('request.periodAvailable')
-        : t('results.request.periodUnavailable');
+      : t('request.periodValidation');
 
-  const submit = () => {
-    const outcome = createRequest(item.id, startIso, endIso, message);
+  const submit = async () => {
+    const outcome = await createRequest(item.id, startIso, endIso, message);
     setResult(outcome);
     if (outcome.ok) {
       onOpenChange(false);
@@ -607,16 +592,8 @@ function RequestDialog({
               />
             </Field>
           </div>
-          <output
-            className={
-              available ? 'inline-status success' : 'inline-status warning'
-            }
-          >
-            {available ? (
-              <CheckCircle2 aria-hidden="true" />
-            ) : (
-              <TriangleAlert aria-hidden="true" />
-            )}
+          <output className="inline-status warning">
+            <TriangleAlert aria-hidden="true" />
             {availabilityMessage}
           </output>
           <div className="terms-review">
@@ -664,7 +641,7 @@ function RequestDialog({
           </Button>
           <Button
             type="button"
-            disabled={!available || !accepted}
+            disabled={!canSubmit || !accepted}
             onClick={submit}
           >
             {t('request.submit')}
@@ -677,15 +654,15 @@ function RequestDialog({
 
 export function MyItemsPage() {
   const { t, formatMoney } = useI18n();
-  const { state, setListingStatus } = useDemo();
+  const { state, setListingStatus } = useLendUp();
   const [archiveId, setArchiveId] = useState<string | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
   const items = state.listings.filter(
     (item) => item.ownerId === state.currentUserId,
   );
   const archiveTarget = items.find((item) => item.id === archiveId);
-  const change = (id: string, status: ListingStatus) =>
-    setResult(setListingStatus(id, status));
+  const change = async (id: string, status: ListingStatus) =>
+    setResult(await setListingStatus(id, status));
 
   return (
     <>
@@ -700,6 +677,7 @@ export function MyItemsPage() {
           </Button>
         }
       />
+      <p className="muted small">{t('myItems.activeOnly')}</p>
       <Feedback result={result} />
       {items.length ? (
         <ul className="my-items-list">
@@ -803,8 +781,8 @@ export function MyItemsPage() {
         </ul>
       ) : (
         <EmptyState
-          title={t('myItems.emptyTitle')}
-          description={t('myItems.emptyDescription')}
+          title={t('myItems.noActiveTitle')}
+          description={t('myItems.activeOnly')}
           action={t('myItems.publishFirst')}
           href="/my-items/new"
         />
@@ -828,16 +806,13 @@ export function MyItemsPage() {
 }
 
 export function ListingFormPage({ edit = false }: { edit?: boolean }) {
-  const { t, formatNumber } = useI18n();
+  const { t } = useI18n();
   const { id } = useParams();
-  const { state, createListing, updateListing } = useDemo();
+  const { state, createListing, updateListing } = useLendUp();
   const navigate = useNavigate();
   const { guard, dialog } = useOperationGate();
   const user = currentUserOf(state);
   const existing = state.listings.find((item) => item.id === id);
-  const [media, setMedia] = useState<ListingMedia[]>(existing?.media ?? []);
-  const [mediaError, setMediaError] = useState('');
-  const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
   const schema = useMemo(
     () =>
@@ -921,40 +896,7 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
       />
     );
 
-  const addMedia = async (files: FileList | null) => {
-    if (!files?.length) return;
-    setUploading(true);
-    try {
-      const uploaded = await cloudinaryAdapter.uploadMany(files, ['image']);
-      setMedia((current) => [
-        ...current,
-        ...uploaded.map((item) => ({
-          id: item.publicId,
-          type: 'PHOTO' as const,
-          url: item.url,
-          name: item.name,
-        })),
-      ]);
-      setMediaError('');
-    } catch (reason) {
-      setMediaError(
-        reason instanceof UploadError
-          ? t(`uploads.errors.${reason.code}`, {
-              name: reason.fileName,
-              size: formatNumber(cloudinaryAdapter.maxBytes / 1_000_000),
-            })
-          : t('uploads.errors.READ_ERROR', { name: '' }),
-      );
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const submit = (values: Values) => {
-    if (!media.length) {
-      setMediaError(t('validation.photoRequired'));
-      return;
-    }
+  const submit = async (values: Values) => {
     const payload = {
       title: values.title,
       category: values.category as CategoryCode,
@@ -966,8 +908,8 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
       exchangePlace: values.exchangePlace,
       dailyRate: values.dailyRate,
       guaranteeAmount: values.guaranteeAmount,
-      image: media[0].url,
-      media,
+      image: '',
+      media: [],
       availabilitySlots: existing?.availabilitySlots ?? [],
       terms: {
         usage: values.usage,
@@ -977,16 +919,15 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
       },
     };
     if (existing) {
-      const outcome = updateListing(existing.id, payload);
+      const outcome = await updateListing(existing.id, payload);
       setResult(outcome);
       if (outcome.ok) navigate('/my-items');
       return;
     }
-    guard(() => {
-      const outcome = createListing(payload);
+    guard(async () => {
+      const outcome = await createListing(payload);
       setResult(outcome);
-      if (outcome.ok && outcome.id)
-        navigate(`/my-items/${outcome.id}/availability?new=1`);
+      if (outcome.ok) navigate('/my-items');
     });
   };
 
@@ -1127,60 +1068,11 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
         </section>
         <section>
           <h2>{t('listingForm.sections.photos')}</h2>
-          <label className="upload-zone" htmlFor="listing-media">
-            <ImagePlus aria-hidden="true" />
+          <div className="upload-zone" aria-disabled="true">
+            <TriangleAlert aria-hidden="true" />
             <strong>{t('listingForm.photosTitle')}</strong>
-            <span>
-              {t('listingForm.photosHint', {
-                size: formatNumber(cloudinaryAdapter.maxBytes / 1_000_000),
-              })}
-            </span>
-            <span className="button-like">
-              <Upload aria-hidden="true" />
-              {uploading ? t('uploads.uploading') : t('uploads.select')}
-            </span>
-          </label>
-          <input
-            id="listing-media"
-            className="sr-only"
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={(event) => {
-              addMedia(event.target.files);
-              event.target.value = '';
-            }}
-          />
-          {mediaError && (
-            <p className="field-error" role="alert">
-              {mediaError}
-            </p>
-          )}
-          {media.length > 0 && (
-            <ul className="media-previews">
-              {media.map((item, index) => (
-                <li key={item.id}>
-                  <img src={item.url} alt={item.name} />
-                  {index === 0 && (
-                    <span className="cover-tag">{t('listingForm.cover')}</span>
-                  )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={t('evidence.remove', { name: item.name })}
-                    onClick={() =>
-                      setMedia((current) =>
-                        current.filter((candidate) => candidate.id !== item.id),
-                      )
-                    }
-                  >
-                    <X aria-hidden="true" />
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
+            <span>{t('uploads.errors.NOT_CONFIGURED')}</span>
+          </div>
         </section>
         <section>
           <h2>{t('listingForm.sections.conditions')}</h2>
@@ -1238,7 +1130,7 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
           >
             {t('common.cancel')}
           </Button>
-          <Button type="submit" disabled={isSubmitting || uploading}>
+          <Button type="submit" disabled={isSubmitting}>
             {edit ? t('listingForm.save') : t('listingForm.publish')}
           </Button>
         </div>
@@ -1249,23 +1141,10 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
 }
 
 export function AvailabilityPage() {
-  const { t, formatDateTime } = useI18n();
+  const { t } = useI18n();
   const { id } = useParams();
-  const [params] = useSearchParams();
-  const { state, saveAvailability } = useDemo();
+  const { state } = useLendUp();
   const item = state.listings.find((candidate) => candidate.id === id);
-  const [slots, setSlots] = useState<AvailabilitySlot[]>(
-    item?.availabilitySlots.filter((slot) => slot.status === 'AVAILABLE') ?? [],
-  );
-  const [startAt, setStartAt] = useState(() =>
-    toZonedInput(atZonedTime(addDays(today(), 1), 8)),
-  );
-  const [endAt, setEndAt] = useState(() =>
-    toZonedInput(atZonedTime(addDays(today(), 8), 20)),
-  );
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [error, setError] = useState('');
-  const [result, setResult] = useState<ActionResult | null>(null);
   if (!item)
     return (
       <NotFound
@@ -1273,51 +1152,6 @@ export function AvailabilityPage() {
         description={t('listing.notFound.description')}
       />
     );
-  const reserved = item.availabilitySlots.filter(
-    (slot) => slot.status === 'RESERVED',
-  );
-  const dirty =
-    JSON.stringify(slots) !==
-    JSON.stringify(
-      item.availabilitySlots.filter((slot) => slot.status === 'AVAILABLE'),
-    );
-
-  const upsert = () => {
-    const startIso = fromZonedInput(startAt);
-    const endIso = fromZonedInput(endAt);
-    if (!startIso || !endIso || new Date(endIso) <= new Date(startIso))
-      return setError(t('validation.endAfterStart'));
-    if (new Date(endIso) <= new Date())
-      return setError(t('availability.pastRange'));
-    if (
-      reserved.some((slot) =>
-        overlaps(startIso, endIso, slot.startAt, slot.endAt),
-      )
-    )
-      return setError(t('results.availability.overlapsReservation'));
-    if (
-      slots.some(
-        (slot) =>
-          slot.id !== editingId &&
-          overlaps(startIso, endIso, slot.startAt, slot.endAt),
-      )
-    )
-      return setError(t('results.availability.overlapsItself'));
-    const next = {
-      id: editingId ?? `slot-${Date.now().toString(36)}`,
-      startAt: startIso,
-      endAt: endIso,
-      status: 'AVAILABLE' as const,
-    };
-    setSlots((current) =>
-      editingId
-        ? current.map((slot) => (slot.id === editingId ? next : slot))
-        : [...current, next],
-    );
-    setEditingId(null);
-    setError('');
-    setResult(null);
-  };
 
   return (
     <>
@@ -1329,137 +1163,12 @@ export function AvailabilityPage() {
         eyebrow={t('availability.eyebrow')}
         title={item.title}
         description={t('availability.description')}
-        action={
-          <Button
-            type="button"
-            disabled={!dirty}
-            onClick={() => setResult(saveAvailability(item.id, slots))}
-          >
-            {t('availability.save')}
-          </Button>
-        }
       />
-      {params.get('new') && (
-        <div className="app-banner success">
-          <CheckCircle2 aria-hidden="true" />
-          <p>{t('availability.published')}</p>
-        </div>
-      )}
-      <Feedback result={result} />
-      <div className="two-panel-grid">
-        <section className="panel">
-          <h2>
-            {editingId
-              ? t('availability.editWindow')
-              : t('availability.addWindow')}
-          </h2>
-          <div className="date-fields">
-            <Field label={t('fields.from')}>
-              <input
-                type="datetime-local"
-                value={startAt}
-                onChange={(event) => setStartAt(event.target.value)}
-              />
-            </Field>
-            <Field label={t('fields.to')}>
-              <input
-                type="datetime-local"
-                value={endAt}
-                min={startAt}
-                onChange={(event) => setEndAt(event.target.value)}
-              />
-            </Field>
-          </div>
-          {error && (
-            <p className="field-error" role="alert">
-              {error}
-            </p>
-          )}
-          <div className="button-row">
-            <Button type="button" variant="outline" onClick={upsert}>
-              <Plus aria-hidden="true" />
-              {editingId ? t('availability.update') : t('availability.add')}
-            </Button>
-            {editingId && (
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setEditingId(null)}
-              >
-                {t('common.cancel')}
-              </Button>
-            )}
-          </div>
-          {dirty && <p className="muted small">{t('availability.unsaved')}</p>}
-        </section>
-        <section className="panel slot-list">
-          <h2>{t('availability.windows')}</h2>
-          {slots.length ? (
-            <ul>
-              {[...slots]
-                .sort((a, b) => a.startAt.localeCompare(b.startAt))
-                .map((slot) => (
-                  <li key={slot.id}>
-                    <span>
-                      <Check aria-hidden="true" />
-                      {formatDateTime(slot.startAt)} –{' '}
-                      {formatDateTime(slot.endAt)}
-                    </span>
-                    <span className="slot-actions">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={t('availability.editAria')}
-                        onClick={() => {
-                          setEditingId(slot.id);
-                          setStartAt(toZonedInput(slot.startAt));
-                          setEndAt(toZonedInput(slot.endAt));
-                        }}
-                      >
-                        <Edit3 aria-hidden="true" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={t('availability.removeAria')}
-                        onClick={() =>
-                          setSlots((current) =>
-                            current.filter(
-                              (candidate) => candidate.id !== slot.id,
-                            ),
-                          )
-                        }
-                      >
-                        <Trash2 aria-hidden="true" />
-                      </Button>
-                    </span>
-                  </li>
-                ))}
-            </ul>
-          ) : (
-            <p className="muted">{t('availability.noWindows')}</p>
-          )}
-          <h2>{t('availability.reserved')}</h2>
-          {reserved.length ? (
-            <ul>
-              {reserved.map((slot) => (
-                <li key={slot.id} className="reserved">
-                  <span>
-                    <ShieldCheck aria-hidden="true" />
-                    {formatDateTime(slot.startAt)} –{' '}
-                    {formatDateTime(slot.endAt)}
-                  </span>
-                  <StatusBadge kind="reservation" status="CONFIRMED" />
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted">{t('availability.noReserved')}</p>
-          )}
-        </section>
-      </div>
+      <EmptyState
+        icon={CalendarDays}
+        title={t('common.backendGap')}
+        description={t('availability.backendGap')}
+      />
     </>
   );
 }

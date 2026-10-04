@@ -442,7 +442,7 @@ export function LoadingSkeleton({ cards = 3 }: { cards?: number }) {
 export function Feedback({
   result,
 }: {
-  result?: { ok: boolean; message: MessageKey } | null;
+  result?: { ok: boolean; message: MessageKey; detail?: string } | null;
 }) {
   const { t } = useI18n();
   if (!result) return null;
@@ -456,7 +456,10 @@ export function Feedback({
       ) : (
         <AlertCircle aria-hidden="true" />
       )}
-      {t(result.message)}
+      <span>
+        {t(result.message)}
+        {result.detail ? ` ${result.detail}` : ''}
+      </span>
     </p>
   );
 }
@@ -500,7 +503,8 @@ export function NotificationRow({
       <div>
         <div className="row-title">
           <strong>
-            {t(`notifications.events.${notification.event}.title`)}
+            {notification.title ??
+              t(`notifications.events.${notification.event}.title`)}
           </strong>
           {!notification.read && (
             <span className="unread-dot">
@@ -509,9 +513,10 @@ export function NotificationRow({
           )}
         </div>
         <p>
-          {t(`notifications.events.${notification.event}.message`, {
-            ...notification.params,
-          })}
+          {notification.message ??
+            t(`notifications.events.${notification.event}.message`, {
+              ...notification.params,
+            })}
         </p>
         <small>{formatRelative(notification.createdAt)}</small>
       </div>
