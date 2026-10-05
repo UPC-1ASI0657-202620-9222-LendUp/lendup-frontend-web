@@ -249,6 +249,7 @@ export const en: Messages = {
       CANCELLED: 'Cancelled',
     },
     loan: {
+      AWAITING_DELIVERY: 'Awaiting handover',
       PENDING_RECEIPT: 'Delivered · awaiting confirmation',
       ACTIVE: 'Active',
       OVERDUE: 'Overdue',
@@ -697,6 +698,8 @@ export const en: Messages = {
       history: "You don't have completed loans yet",
     },
     next: {
+      RECORD_DELIVERY: 'Record the item handover',
+      WAIT_DELIVERY: 'Waiting for the lender to record the handover',
       CONFIRM_RECEIPT: 'Confirm you received the item',
       WAIT_RECEIPT: 'Waiting for the borrower to confirm receipt',
       RECORD_RETURN: 'Record the return of the item',
@@ -746,6 +749,7 @@ export const en: Messages = {
     yourRating: 'You rated {stars} star(s)',
     ratingPending: "You haven't rated your counterpart yet.",
     actions: {
+      recordDelivery: 'Record handover',
       confirmReceipt: 'Confirm receipt',
       recordReturn: 'Record return',
       earlyReturn: 'Return early',

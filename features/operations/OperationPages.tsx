@@ -560,6 +560,13 @@ function ReservationActions({ reservation }: { reservation: Reservation }) {
     (item) => item.reservationId === reservation.id,
   );
   const settled = isPaymentSettled(reservation);
+  if (loan && !isBorrower && loan.status === 'AWAITING_DELIVERY' && settled)
+    return (
+      <Button render={<Link to={`/delivery?reservation=${reservation.id}`} />}>
+        <FileCheck2 aria-hidden="true" />
+        {t('reservations.recordDelivery')}
+      </Button>
+    );
   if (loan)
     return (
       <Button render={<Link to={`/loans/${loan.id}`} />}>
@@ -1149,7 +1156,7 @@ export function DeliveryPage() {
 
 type LoanTab = 'upcoming' | 'active' | 'overdue' | 'history';
 const loanTabStatuses: Record<LoanTab, Loan['status'][]> = {
-  upcoming: ['PENDING_RECEIPT'],
+  upcoming: ['AWAITING_DELIVERY', 'PENDING_RECEIPT'],
   active: ['ACTIVE', 'RETURN_RECORDED', 'RETURN_CONFIRMED_PENDING_INCIDENT'],
   overdue: ['OVERDUE'],
   history: ['COMPLETED'],
@@ -1317,6 +1324,13 @@ export function LoanDetailPage() {
         {t('loanDetail.actions.confirmReceipt')}
       </Button>,
     );
+  if (!isBorrower && loan.status === 'AWAITING_DELIVERY' && reservation)
+    add(
+      'delivery',
+      <Button render={<Link to={`/delivery?reservation=${reservation.id}`} />}>
+        {t('loanDetail.actions.recordDelivery')}
+      </Button>,
+    );
   if (isBorrower && ['ACTIVE', 'OVERDUE'].includes(loan.status)) {
     add(
       'return',
@@ -1384,7 +1398,7 @@ export function LoanDetailPage() {
         {t('loanDetail.actions.rate')}
       </Button>,
     );
-  if (loan.status !== 'COMPLETED')
+  if (loan.status !== 'COMPLETED' && loan.status !== 'AWAITING_DELIVERY')
     add(
       'incident',
       <Button
@@ -1463,7 +1477,12 @@ export function LoanDetailPage() {
                     ],
                   ] as [string, string][])
                 : []),
-              [t('loanDetail.deliveredAt'), formatDateTime(loan.deliveredAt)],
+              [
+                t('loanDetail.deliveredAt'),
+                loan.deliveredAt
+                  ? formatDateTime(loan.deliveredAt)
+                  : t('common.pending'),
+              ],
               [
                 t('loanDetail.receivedAt'),
                 loan.receiptConfirmedAt

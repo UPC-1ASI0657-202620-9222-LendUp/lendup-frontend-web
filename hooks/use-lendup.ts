@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import { isMissingProfile } from '@/lib/profile-recovery';
+import { reconcileReservationsWithLoans } from '@/lib/business-rules';
 import { categoryIds } from '@/config/reference-data';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
@@ -206,7 +207,7 @@ export function useLendUp() {
 
   const listings = (listingsQuery.data ?? []).map(mapListing);
   const requests = (requestsQuery.data ?? []).map(mapRequest);
-  const reservations = (reservationsQuery.data ?? []).map((row) =>
+  const mappedReservations = (reservationsQuery.data ?? []).map((row) =>
     mapReservation(
       row,
       requests.find((request) => request.id === String(row.solicitud_id ?? '')),
@@ -215,10 +216,14 @@ export function useLendUp() {
   const loans = (loansQuery.data ?? []).map((row) =>
     mapLoan(
       row,
-      reservations.find(
+      mappedReservations.find(
         (reservation) => reservation.id === String(row.reserva_id ?? ''),
       ),
     ),
+  );
+  const reservations = reconcileReservationsWithLoans(
+    mappedReservations,
+    loans,
   );
   const incidents = [
     ...(adminIncidentsQuery.data ?? []),

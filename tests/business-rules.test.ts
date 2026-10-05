@@ -27,6 +27,7 @@ import {
   mayRateLoan,
   overlaps,
   releaseFutureAvailability,
+  reconcileReservationsWithLoans,
   remainingGuarantee,
   removeOperationReminders,
   rentalDays,
@@ -438,6 +439,14 @@ describe('Préstamos — ciclo de vida', () => {
 
   it('determina la siguiente acción según el rol', () => {
     assert.equal(
+      loanNextAction(loan({ status: 'AWAITING_DELIVERY' }), 'l'),
+      'RECORD_DELIVERY',
+    );
+    assert.equal(
+      loanNextAction(loan({ status: 'AWAITING_DELIVERY' }), 'b'),
+      'WAIT_DELIVERY',
+    );
+    assert.equal(
       loanNextAction(loan({ status: 'PENDING_RECEIPT' }), 'b'),
       'CONFIRM_RECEIPT',
     );
@@ -465,6 +474,30 @@ describe('Préstamos — ciclo de vida', () => {
       loanNextAction(loan({ status: 'COMPLETED', ratedBy: ['b'] }), 'b'),
       'NONE',
     );
+  });
+
+  it('sincroniza pago, garantía y entrega desde el préstamo autoritativo', () => {
+    const before = reservation();
+    const awaiting = reconcileReservationsWithLoans(
+      [before],
+      [
+        loan({
+          status: 'AWAITING_DELIVERY',
+          paymentStatus: 'PENDING_RELEASE',
+          guaranteeStatus: 'HELD',
+          deliveredAt: undefined,
+        }),
+      ],
+    )[0];
+    assert.equal(awaiting.paymentStatus, 'PENDING_RELEASE');
+    assert.equal(awaiting.guaranteeStatus, 'HELD');
+    assert.equal(awaiting.deliveryRecorded, false);
+
+    const delivered = reconcileReservationsWithLoans(
+      [before],
+      [loan({ status: 'PENDING_RECEIPT' })],
+    )[0];
+    assert.equal(delivered.deliveryRecorded, true);
   });
 
   it('permite calificar una sola vez y solo préstamos finalizados (US38)', () => {

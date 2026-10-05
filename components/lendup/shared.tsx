@@ -59,6 +59,7 @@ const toneByStatus: Record<string, Tone> = {
   SUCCESS: 'success',
   VERIFIED: 'success',
   HELD: 'info',
+  AWAITING_DELIVERY: 'warning',
   PENDING_RELEASE: 'info',
   PENDING_RECEIPT: 'info',
   RETURN_RECORDED: 'info',

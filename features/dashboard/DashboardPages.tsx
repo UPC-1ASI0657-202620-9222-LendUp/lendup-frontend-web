@@ -269,6 +269,7 @@ export function DashboardPage() {
               [
                 'ACTIVE',
                 'OVERDUE',
+                'AWAITING_DELIVERY',
                 'PENDING_RECEIPT',
                 'RETURN_RECORDED',
               ].includes(item.status),
@@ -506,14 +507,18 @@ export function CalendarPage() {
           item: title(item.listingId),
           href: `/reservations/${item.id}`,
         },
-        ...(loanReservationIds.has(item.id) ? [] : [{
-          id: `${item.id}-return`,
-          date: new Date(item.snapshot.endAt),
-          kind: 'return' as const,
-          label: 'calendar.events.return' as MessageKey,
-          item: title(item.listingId),
-          href: `/reservations/${item.id}`,
-        }]),
+        ...(loanReservationIds.has(item.id)
+          ? []
+          : [
+              {
+                id: `${item.id}-return`,
+                date: new Date(item.snapshot.endAt),
+                kind: 'return' as const,
+                label: 'calendar.events.return' as MessageKey,
+                item: title(item.listingId),
+                href: `/reservations/${item.id}`,
+              },
+            ]),
       ]);
     const fromLoans = state.loans
       .filter(

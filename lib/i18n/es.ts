@@ -252,6 +252,7 @@ export const es = {
       CANCELLED: 'Cancelada',
     },
     loan: {
+      AWAITING_DELIVERY: 'Pendiente de entrega',
       PENDING_RECEIPT: 'Entregado · por confirmar',
       ACTIVE: 'Activo',
       OVERDUE: 'Vencido',
@@ -704,6 +705,8 @@ export const es = {
       history: 'Aún no tienes préstamos finalizados',
     },
     next: {
+      RECORD_DELIVERY: 'Registra la entrega del objeto',
+      WAIT_DELIVERY: 'Esperando que el prestamista registre la entrega',
       CONFIRM_RECEIPT: 'Confirma que recibiste el objeto',
       WAIT_RECEIPT: 'Esperando que el prestatario confirme la recepción',
       RECORD_RETURN: 'Registra la devolución del objeto',
@@ -754,6 +757,7 @@ export const es = {
     yourRating: 'Calificaste con {stars} estrella(s)',
     ratingPending: 'Aún no calificaste a tu contraparte.',
     actions: {
+      recordDelivery: 'Registrar entrega',
       confirmReceipt: 'Confirmar recepción',
       recordReturn: 'Registrar devolución',
       earlyReturn: 'Devolver antes de tiempo',

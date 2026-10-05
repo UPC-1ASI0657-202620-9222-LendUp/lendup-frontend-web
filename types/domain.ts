@@ -9,6 +9,7 @@ export type ReservationStatus =
   | 'ACTIVATED'
   | 'COMPLETED';
 export type LoanStatus =
+  | 'AWAITING_DELIVERY'
   | 'PENDING_RECEIPT'
   | 'ACTIVE'
   | 'OVERDUE'
@@ -282,7 +283,7 @@ export interface Loan {
   paymentStatus: PaymentStatus;
   guaranteeStatus: GuaranteeStatus;
   snapshot: TermsSnapshot;
-  deliveredAt: string;
+  deliveredAt?: string;
   currentReturnAt: string;
   originalReturnAt: string;
   actualReturnAt?: string;

@@ -247,7 +247,7 @@ export function mapReservation(
 
 export function mapLoan(row: BackendRow, reservation?: Reservation): Loan {
   const statusMap: Record<string, Loan['status']> = {
-    RESERVADO: 'PENDING_RECEIPT',
+    RESERVADO: 'AWAITING_DELIVERY',
     ENTREGA_REGISTRADA: 'PENDING_RECEIPT',
     ACTIVO: 'ACTIVE',
     VENCIDO: 'OVERDUE',
@@ -263,7 +263,7 @@ export function mapLoan(row: BackendRow, reservation?: Reservation): Loan {
     listingId: text(row, 'publicacion_id'),
     borrowerId: text(row, 'prestatario_usuario_id'),
     lenderId: text(row, 'prestamista_usuario_id'),
-    status: statusMap[text(row, 'estado')] ?? 'PENDING_RECEIPT',
+    status: statusMap[text(row, 'estado')] ?? 'AWAITING_DELIVERY',
     paymentStatus: text(row, 'pago_tarifa_confirmado_en')
       ? 'PENDING_RELEASE'
       : 'PENDING',
@@ -288,7 +288,7 @@ export function mapLoan(row: BackendRow, reservation?: Reservation): Loan {
       cancellationPolicy: { borrowerRefundRate: 0, lenderRefundRate: 0 },
       acceptedAt: iso(row, 'creado_en'),
     },
-    deliveredAt: text(row, 'entrega_registrada_en') || startAt,
+    deliveredAt: text(row, 'entrega_registrada_en') || undefined,
     currentReturnAt: iso(row, 'devolucion_vigente_en'),
     originalReturnAt: originalEndAt,
     actualReturnAt: text(row, 'devolucion_registrada_en') || undefined,

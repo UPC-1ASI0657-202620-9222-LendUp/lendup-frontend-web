@@ -374,6 +374,8 @@ export function transactionRoute(transaction: PaymentTransaction) {
 }
 
 export type LoanNextAction =
+  | 'RECORD_DELIVERY'
+  | 'WAIT_DELIVERY'
   | 'CONFIRM_RECEIPT'
   | 'WAIT_RECEIPT'
   | 'RECORD_RETURN'
@@ -387,6 +389,8 @@ export type LoanNextAction =
 export function loanNextAction(loan: Loan, userId: string): LoanNextAction {
   const borrower = loan.borrowerId === userId;
   switch (loan.status) {
+    case 'AWAITING_DELIVERY':
+      return borrower ? 'WAIT_DELIVERY' : 'RECORD_DELIVERY';
     case 'PENDING_RECEIPT':
       return borrower ? 'CONFIRM_RECEIPT' : 'WAIT_RECEIPT';
     case 'ACTIVE':
@@ -399,6 +403,35 @@ export function loanNextAction(loan: Loan, userId: string): LoanNextAction {
     case 'COMPLETED':
       return loan.ratedBy.includes(userId) ? 'NONE' : 'RATE';
   }
+}
+
+export function reconcileReservationsWithLoans(
+  reservations: Reservation[],
+  loans: Loan[],
+) {
+  return reservations.map((reservation) => {
+    const loan = loans.find((item) => item.reservationId === reservation.id);
+    if (!loan) return reservation;
+    const active = [
+      'ACTIVE',
+      'OVERDUE',
+      'RETURN_RECORDED',
+      'RETURN_CONFIRMED_PENDING_INCIDENT',
+    ].includes(loan.status);
+    return {
+      ...reservation,
+      status:
+        loan.status === 'COMPLETED'
+          ? ('COMPLETED' as const)
+          : active
+            ? ('ACTIVATED' as const)
+            : reservation.status,
+      paymentStatus: loan.paymentStatus,
+      guaranteeStatus: loan.guaranteeStatus,
+      deliveryRecorded: loan.status !== 'AWAITING_DELIVERY',
+      deliveredAt: loan.deliveredAt,
+    };
+  });
 }
 
 export function distanceKm(from: Coordinates, to: Coordinates) {

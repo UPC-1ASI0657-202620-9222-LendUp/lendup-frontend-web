@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { photoSelectionError, MAX_PHOTO_BYTES } from '../lib/listing-photos.ts';
-import { mapListing } from '../services/api/mappers/domain.ts';
+import { mapListing, mapLoan } from '../services/api/mappers/domain.ts';
 test('photo selection enforces type, size and total count', () => {
   assert.equal(
     photoSelectionError([{ type: 'image/png', size: 100 }], 5),
@@ -64,4 +64,15 @@ test('catalog preserves available and reserved periods returned by the backend',
   assert.equal(listing.availabilitySlots[0].id, 'available-1');
   assert.equal(listing.availabilitySlots[0].status, 'AVAILABLE');
   assert.equal(listing.availabilitySlots[1].status, 'RESERVED');
+});
+test('a reserved loan awaits handover instead of allowing receipt confirmation', () => {
+  const loan = mapLoan({
+    id: 'loan-1',
+    estado: 'RESERVADO',
+    entrega_programada_en: '2026-10-06T12:00:00',
+    devolucion_original_en: '2026-10-08T12:00:00',
+    devolucion_vigente_en: '2026-10-08T12:00:00',
+  });
+  assert.equal(loan.status, 'AWAITING_DELIVERY');
+  assert.equal(loan.deliveredAt, undefined);
 });
