@@ -1316,6 +1316,10 @@ export const es = {
     notFound: 'Perfil no encontrado',
   },
   terms: {
+    loadFailed:
+      'No pudimos cargar los términos. Reintenta para leerlos y aceptarlos.',
+    versionLabel: 'Versión vigente: {version}',
+    verifyFirst: 'Verifica tu correo antes de aceptar los términos.',
     eyebrow: 'Términos y condiciones',
     title: 'Términos y condiciones de LendUp',
     description:

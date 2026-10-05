@@ -186,7 +186,7 @@ export function useLendUp() {
   const termsQuery = useQuery({
     queryKey: queryKeys.terms,
     queryFn: ({ signal }) => backendCatalogService.terms(signal),
-    enabled,
+    enabled: true,
     staleTime: 60_000,
   });
   const adminIncidentsQuery = useQuery({
@@ -282,11 +282,17 @@ export function useLendUp() {
     (query.data ?? []).map((row) => mapTransaction(row, currentUser?.id ?? '')),
   );
   const termsAccepted = Boolean(
-    meQuery.data?.usuario.version_terminos_aceptada &&
-    meQuery.data?.usuario.version_descargo_aceptada,
+    termsQuery.data?.version_terminos &&
+    termsQuery.data?.version_descargo &&
+    meQuery.data?.usuario.version_terminos_aceptada ===
+      termsQuery.data.version_terminos &&
+    meQuery.data?.usuario.version_descargo_aceptada ===
+      termsQuery.data.version_descargo,
   );
   const termsAvailable = Boolean(
-    termsQuery.data?.version_terminos && termsQuery.data?.version_descargo,
+    termsQuery.data?.version_terminos &&
+    termsQuery.data?.version_descargo &&
+    termsQuery.data?.contenido,
   );
 
   const state: AppState = useMemo(
@@ -676,6 +682,10 @@ export function useLendUp() {
     ),
     retryProfile: () => meQuery.refetch(),
     termsAvailable,
+    termsDocument: termsQuery.data,
+    termsLoading: termsQuery.isLoading,
+    termsError: termsQuery.isError,
+    retryTerms: () => termsQuery.refetch(),
     login,
     logout,
     registerUser,

@@ -1291,6 +1291,9 @@ export const en: Messages = {
     notFound: 'Profile not found',
   },
   terms: {
+    loadFailed: 'We could not load the terms. Retry to read and accept them.',
+    versionLabel: 'Current version: {version}',
+    verifyFirst: 'Verify your email before accepting the terms.',
     eyebrow: 'Terms and conditions',
     title: 'LendUp terms and conditions',
     description:

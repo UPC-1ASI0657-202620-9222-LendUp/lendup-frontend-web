@@ -5,6 +5,15 @@ import type {
   CreatePublicationRequestDto,
 } from '@/services/api/dto/backend';
 
+export interface TermsDocumentDto {
+  titulo: string;
+  version_terminos: string;
+  version_descargo: string;
+  publicado_en: string;
+  idioma: string;
+  contenido: string;
+}
+
 export type CatalogFilters = {
   nombre?: string;
   categoria?: string;
@@ -34,5 +43,5 @@ export const backendCatalogService = {
       body: { estado },
     }),
   terms: (signal?: AbortSignal) =>
-    gatewayRequest<BackendRow>(endpoints.catalog.terms, { signal }),
+    gatewayRequest<TermsDocumentDto>(endpoints.catalog.terms, { signal }),
 };

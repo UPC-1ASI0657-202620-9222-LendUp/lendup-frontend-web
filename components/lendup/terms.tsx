@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ShieldAlert } from 'lucide-react';
+import { parseTermsDocument } from '@/lib/terms-document';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -17,23 +17,58 @@ import { useLendUp, type ActionResult } from '@/hooks/use-lendup';
 
 export function TermsDocument() {
   const { t } = useI18n();
+  const { termsDocument, termsAvailable, termsLoading, retryTerms } =
+    useLendUp();
+  if (termsLoading) return <output>{t('common.loading')}</output>;
+  if (!termsAvailable)
+    return (
+      <div role="alert">
+        <p>{t('terms.loadFailed')}</p>
+        <Button onClick={() => void retryTerms()}>{t('common.retry')}</Button>
+      </div>
+    );
+  const sections = parseTermsDocument(String(termsDocument?.contenido ?? ''));
   return (
-    <article className="terms-document">
-      <aside className="legal-note">
-        <ShieldAlert aria-hidden="true" />
-        <div>
-          <h2>{t('common.backendGap')}</h2>
-          <p>{t('terms.disclaimer.body')}</p>
-        </div>
-      </aside>
+    <article className="terms-document" lang="es">
+      <p className="muted small">
+        {t('terms.versionLabel', {
+          version: String(termsDocument?.version_terminos ?? ''),
+        })}
+      </p>
+      {sections.map((section) => (
+        <section key={section.title}>
+          <h2>{section.title}</h2>
+          {section.blocks.map((block, index) =>
+            block.list ? (
+              <ul key={index}>
+                {block.lines.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            ) : (
+              <p key={index}>{block.lines[0]}</p>
+            ),
+          )}
+        </section>
+      ))}
     </article>
   );
 }
 
 export function TermsAcceptance({ onAccepted }: { onAccepted?: () => void }) {
   const { t } = useI18n();
-  const { acceptTerms, termsAvailable } = useLendUp();
-  const [checked, setChecked] = useState(false);
+  const {
+    acceptTerms,
+    termsAvailable,
+    termsLoading,
+    retryTerms,
+    termsDocument,
+    emailVerified,
+  } = useLendUp();
+  const [checkedVersion, setCheckedVersion] = useState<string | null>(null);
+  const version = String(termsDocument?.version_terminos ?? '');
+  const checked = checkedVersion === version && Boolean(version);
+  const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
   return (
     <div className="terms-acceptance">
@@ -41,25 +76,39 @@ export function TermsAcceptance({ onAccepted }: { onAccepted?: () => void }) {
         <input
           type="checkbox"
           checked={checked}
-          disabled={!termsAvailable}
-          onChange={(event) => setChecked(event.target.checked)}
+          disabled={!termsAvailable || submitting || !emailVerified}
+          onChange={(event) =>
+            setCheckedVersion(event.target.checked ? version : null)
+          }
         />
         {t('terms.acceptLabel')}
       </label>
       <Button
         type="button"
-        disabled={!checked || !termsAvailable}
+        disabled={!checked || !termsAvailable || submitting || !emailVerified}
         onClick={async () => {
+          setSubmitting(true);
           const outcome = await acceptTerms();
+          setSubmitting(false);
           setResult(outcome);
           if (outcome.ok) onAccepted?.();
         }}
       >
-        {t('terms.accept')}
+        {submitting ? t('common.processing') : t('terms.accept')}
       </Button>
       {!termsAvailable && (
-        <p className="muted small">{t('common.backendGap')}</p>
+        <div>
+          <p className="muted small">
+            {t(termsLoading ? 'common.loading' : 'terms.loadFailed')}
+          </p>
+          {!termsLoading && (
+            <Button variant="outline" onClick={() => void retryTerms()}>
+              {t('common.retry')}
+            </Button>
+          )}
+        </div>
       )}
+      {!emailVerified && <p>{t('terms.verifyFirst')}</p>}
       <Feedback result={result && !result.ok ? result : null} />
     </div>
   );
