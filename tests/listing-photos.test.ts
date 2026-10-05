@@ -44,3 +44,24 @@ test('old publications without photos keep their placeholder', () => {
   assert.equal(mapListing({}).image, '/brand/logo-mark-on-light.webp');
   assert.deepEqual(mapListing({}).media, []);
 });
+test('catalog preserves available and reserved periods returned by the backend', () => {
+  const listing = mapListing({
+    disponibilidades: [
+      {
+        id: 'available-1',
+        desde: '2026-10-10T14:00:00',
+        hasta: '2026-10-11T14:00:00',
+        estado: 'DISPONIBLE',
+      },
+      {
+        desde: '2026-10-12T14:00:00',
+        hasta: '2026-10-13T14:00:00',
+        estado: 'RESERVADA',
+      },
+    ],
+  });
+  assert.equal(listing.availabilitySlots.length, 2);
+  assert.equal(listing.availabilitySlots[0].id, 'available-1');
+  assert.equal(listing.availabilitySlots[0].status, 'AVAILABLE');
+  assert.equal(listing.availabilitySlots[1].status, 'RESERVED');
+});

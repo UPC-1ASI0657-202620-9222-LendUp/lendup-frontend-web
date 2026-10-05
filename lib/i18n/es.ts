@@ -457,9 +457,32 @@ export const es = {
     eyebrow: 'Disponibilidad',
     back: 'Volver a mis objetos',
     description:
-      'La disponibilidad debe provenir del backend y conservar los periodos ya registrados y reservados.',
-    backendGap:
-      'El backend permite agregar un intervalo, pero no permite consultar, editar ni eliminar la disponibilidad existente. La gestión queda deshabilitada para evitar sobrescribir o duplicar periodos sin información autoritativa.',
+      'Administra los periodos en los que puedes prestar este objeto. Las reservas confirmadas se conservan y no pueden editarse desde aquí.',
+    manage: 'Gestionar disponibilidad',
+    addTitle: 'Agregar un intervalo',
+    editTitle: 'Editar intervalo',
+    formDescription:
+      'Indica una fecha de inicio y una fecha de fin. Los intervalos disponibles no pueden superponerse.',
+    registered: 'Calendario del objeto',
+    availableTitle: 'Periodos disponibles',
+    reservedTitle: 'Periodos reservados',
+    noAvailable: 'Todavía no registraste periodos disponibles.',
+    noReserved: 'No hay reservas confirmadas para este objeto.',
+    reservedNote:
+      'Las reservas confirmadas son informativas y no pueden modificarse desde esta pantalla.',
+    reserved: 'Reservado',
+    add: 'Agregar intervalo',
+    save: 'Guardar cambios',
+    cancelEdit: 'Cancelar edición',
+    edit: 'Editar intervalo',
+    delete: 'Eliminar intervalo',
+    deleteTitle: 'Eliminar disponibilidad',
+    deleteDescription:
+      'Se eliminará el intervalo {period}. Las reservas confirmadas no se eliminarán.',
+    deleteConfirm: 'Eliminar',
+    invalidRange: 'La fecha final debe ser posterior a la inicial.',
+    pastStart: 'El periodo debe comenzar en el futuro.',
+    overlap: 'El intervalo se superpone con otra disponibilidad registrada.',
   },
   requests: {
     eyebrow: 'Solicitudes',
@@ -1408,6 +1431,11 @@ export const es = {
       published: 'Objeto publicado.',
       updated:
         'Publicación actualizada. Los cambios aplican a nuevas solicitudes.',
+    },
+    availability: {
+      created: 'Intervalo de disponibilidad agregado.',
+      updated: 'Intervalo de disponibilidad actualizado.',
+      deleted: 'Intervalo de disponibilidad eliminado.',
     },
     request: {
       created:

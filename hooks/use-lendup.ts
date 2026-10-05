@@ -479,6 +479,30 @@ export function useLendUp() {
       'results.listing.updated',
       [queryKeys.listings],
     );
+  const createAvailability = (id: string, startAt: string, endAt: string) =>
+    action(
+      () => backendCatalogService.createAvailability(id, startAt, endAt),
+      'results.availability.created',
+      [queryKeys.listings],
+    );
+  const updateAvailability = (
+    id: string,
+    slotId: string,
+    startAt: string,
+    endAt: string,
+  ) =>
+    action(
+      () =>
+        backendCatalogService.updateAvailability(id, slotId, startAt, endAt),
+      'results.availability.updated',
+      [queryKeys.listings],
+    );
+  const deleteAvailability = (id: string, slotId: string) =>
+    action(
+      () => backendCatalogService.deleteAvailability(id, slotId),
+      'results.availability.deleted',
+      [queryKeys.listings],
+    );
   const createRequest = (
     listingId: string,
     startAt: string,
@@ -695,6 +719,9 @@ export function useLendUp() {
     createListing,
     updateListing,
     setListingStatus,
+    createAvailability,
+    updateAvailability,
+    deleteAvailability,
     createRequest,
     cancelRequest,
     respondRequest,

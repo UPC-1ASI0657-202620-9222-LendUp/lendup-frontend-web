@@ -1165,10 +1165,26 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
 }
 
 export function AvailabilityPage() {
-  const { t } = useI18n();
+  const { t, formatDateTime } = useI18n();
   const { id } = useParams();
-  const { state } = useLendUp();
+  const { state, createAvailability, updateAvailability, deleteAvailability } =
+    useLendUp();
+  const [defaults] = useState(() => {
+    const start = new Date(Date.now() + 86_400_000);
+    start.setMinutes(0, 0, 0);
+    return {
+      start: toZonedInput(start),
+      end: toZonedInput(new Date(start.getTime() + 86_400_000)),
+    };
+  });
+  const [startAt, setStartAt] = useState(defaults.start);
+  const [endAt, setEndAt] = useState(defaults.end);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ActionResult | null>(null);
   const item = state.listings.find((candidate) => candidate.id === id);
+
   if (!item)
     return (
       <NotFound
@@ -1176,6 +1192,76 @@ export function AvailabilityPage() {
         description={t('listing.notFound.description')}
       />
     );
+
+  const available = item.availabilitySlots
+    .filter((slot) => slot.status === 'AVAILABLE')
+    .sort((a, b) => a.startAt.localeCompare(b.startAt));
+  const reserved = item.availabilitySlots
+    .filter((slot) => slot.status === 'RESERVED')
+    .sort((a, b) => a.startAt.localeCompare(b.startAt));
+  const deleteTarget = available.find((slot) => slot.id === deleteId);
+  const startIso = fromZonedInput(startAt);
+  const endIso = fromZonedInput(endAt);
+  const validRange = Boolean(
+    startIso && endIso && new Date(endIso) > new Date(startIso),
+  );
+  const future = Boolean(startIso && new Date(startIso) > new Date());
+  const overlaps = Boolean(
+    validRange &&
+    available.some(
+      (slot) =>
+        slot.id !== editingId &&
+        new Date(startIso) < new Date(slot.endAt) &&
+        new Date(endIso) > new Date(slot.startAt),
+    ),
+  );
+  const canSubmit = Boolean(
+    startAt && endAt && validRange && future && !overlaps,
+  );
+  const validationMessage =
+    !startAt || !endAt
+      ? null
+      : !validRange
+        ? t('availability.invalidRange')
+        : !future
+          ? t('availability.pastStart')
+          : overlaps
+            ? t('availability.overlap')
+            : null;
+
+  const resetForm = () => {
+    setEditingId(null);
+    setStartAt(defaults.start);
+    setEndAt(defaults.end);
+  };
+  const beginEdit = (slot: (typeof available)[number]) => {
+    setEditingId(slot.id);
+    setStartAt(toZonedInput(slot.startAt));
+    setEndAt(toZonedInput(slot.endAt));
+    setResult(null);
+  };
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canSubmit) return;
+    setBusy(true);
+    const outcome = editingId
+      ? await updateAvailability(item.id, editingId, startIso, endIso)
+      : await createAvailability(item.id, startIso, endIso);
+    setBusy(false);
+    setResult(outcome);
+    if (outcome.ok) resetForm();
+  };
+  const remove = async () => {
+    if (!deleteTarget) return;
+    setBusy(true);
+    const outcome = await deleteAvailability(item.id, deleteTarget.id);
+    setBusy(false);
+    setResult(outcome);
+    if (outcome.ok) {
+      if (editingId === deleteTarget.id) resetForm();
+      setDeleteId(null);
+    }
+  };
 
   return (
     <>
@@ -1188,10 +1274,137 @@ export function AvailabilityPage() {
         title={item.title}
         description={t('availability.description')}
       />
-      <EmptyState
-        icon={CalendarDays}
-        title={t('common.backendGap')}
-        description={t('availability.backendGap')}
+      <div className="availability-layout">
+        <form className="panel availability-form" onSubmit={submit}>
+          <div>
+            <p className="eyebrow">{t('availability.manage')}</p>
+            <h2>
+              {editingId
+                ? t('availability.editTitle')
+                : t('availability.addTitle')}
+            </h2>
+            <p className="muted small">{t('availability.formDescription')}</p>
+          </div>
+          <div className="date-fields">
+            <Field label={t('fields.from')} required>
+              <input
+                type="datetime-local"
+                value={startAt}
+                onChange={(event) => setStartAt(event.target.value)}
+                required
+              />
+            </Field>
+            <Field label={t('fields.to')} required>
+              <input
+                type="datetime-local"
+                value={endAt}
+                min={startAt}
+                onChange={(event) => setEndAt(event.target.value)}
+                required
+              />
+            </Field>
+          </div>
+          {validationMessage && (
+            <p className="field-error" role="alert">
+              {validationMessage}
+            </p>
+          )}
+          <Feedback result={result} />
+          <div className="form-footer">
+            {editingId && (
+              <Button type="button" variant="outline" onClick={resetForm}>
+                {t('availability.cancelEdit')}
+              </Button>
+            )}
+            <Button type="submit" disabled={!canSubmit || busy}>
+              {busy
+                ? t('common.processing')
+                : editingId
+                  ? t('availability.save')
+                  : t('availability.add')}
+            </Button>
+          </div>
+        </form>
+
+        <section className="panel slot-list">
+          <p className="eyebrow">{t('availability.registered')}</p>
+          <h2>{t('availability.availableTitle')}</h2>
+          {available.length ? (
+            <ul>
+              {available.map((slot) => (
+                <li key={slot.id}>
+                  <span>
+                    <Check aria-hidden="true" />
+                    {formatDateTime(slot.startAt)} –{' '}
+                    {formatDateTime(slot.endAt)}
+                  </span>
+                  <span className="slot-actions">
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={t('availability.edit')}
+                      onClick={() => beginEdit(slot)}
+                    >
+                      <Edit3 aria-hidden="true" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="destructive"
+                      aria-label={t('availability.delete')}
+                      onClick={() => setDeleteId(slot.id)}
+                    >
+                      <Trash2 aria-hidden="true" />
+                    </Button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">{t('availability.noAvailable')}</p>
+          )}
+
+          <h2>{t('availability.reservedTitle')}</h2>
+          <p className="muted small">{t('availability.reservedNote')}</p>
+          {reserved.length ? (
+            <ul>
+              {reserved.map((slot, index) => (
+                <li
+                  className="reserved"
+                  key={`${slot.startAt}-${slot.endAt}-${index}`}
+                >
+                  <span>
+                    <CalendarDays aria-hidden="true" />
+                    {formatDateTime(slot.startAt)} –{' '}
+                    {formatDateTime(slot.endAt)}
+                  </span>
+                  <span className="status-label">
+                    {t('availability.reserved')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">{t('availability.noReserved')}</p>
+          )}
+        </section>
+      </div>
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => !open && setDeleteId(null)}
+        title={t('availability.deleteTitle')}
+        description={
+          deleteTarget
+            ? t('availability.deleteDescription', {
+                period: `${formatDateTime(deleteTarget.startAt)} – ${formatDateTime(deleteTarget.endAt)}`,
+              })
+            : undefined
+        }
+        confirmLabel={t('availability.deleteConfirm')}
+        destructive
+        busy={busy}
+        onConfirm={remove}
       />
     </>
   );

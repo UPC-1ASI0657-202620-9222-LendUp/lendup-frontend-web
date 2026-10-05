@@ -1,5 +1,6 @@
 import { endpoints } from '@/services/api/endpoints';
 import { gatewayRequest } from '@/services/api/http-client';
+import { toApiLocalDateTime } from '@/lib/dates';
 import type {
   BackendRow,
   CreatePublicationRequestDto,
@@ -41,6 +42,36 @@ export const backendCatalogService = {
     gatewayRequest<BackendRow>(endpoints.catalog.changeStatus, {
       params: { id },
       body: { estado },
+    }),
+  availability: (id: string, signal?: AbortSignal) =>
+    gatewayRequest<BackendRow[]>(endpoints.catalog.availabilityList, {
+      params: { id },
+      signal,
+    }),
+  createAvailability: (id: string, startAt: string, endAt: string) =>
+    gatewayRequest<BackendRow>(endpoints.catalog.availability, {
+      params: { id },
+      body: {
+        desde: toApiLocalDateTime(startAt),
+        hasta: toApiLocalDateTime(endAt),
+      },
+    }),
+  updateAvailability: (
+    id: string,
+    slotId: string,
+    startAt: string,
+    endAt: string,
+  ) =>
+    gatewayRequest<BackendRow>(endpoints.catalog.availabilityUpdate, {
+      params: { id, slotId },
+      body: {
+        desde: toApiLocalDateTime(startAt),
+        hasta: toApiLocalDateTime(endAt),
+      },
+    }),
+  deleteAvailability: (id: string, slotId: string) =>
+    gatewayRequest<void>(endpoints.catalog.availabilityDelete, {
+      params: { id, slotId },
     }),
   terms: (signal?: AbortSignal) =>
     gatewayRequest<TermsDocumentDto>(endpoints.catalog.terms, {

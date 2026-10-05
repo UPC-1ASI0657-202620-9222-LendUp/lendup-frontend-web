@@ -18,6 +18,15 @@ export const endpoints = {
     update: { method: 'PUT', path: '/objetos/{id}' },
     changeStatus: { method: 'PATCH', path: '/objetos/{id}/estado' },
     availability: { method: 'PUT', path: '/objetos/{id}/disponibilidad' },
+    availabilityList: { method: 'GET', path: '/objetos/{id}/disponibilidad' },
+    availabilityUpdate: {
+      method: 'PUT',
+      path: '/objetos/{id}/disponibilidad/{slotId}',
+    },
+    availabilityDelete: {
+      method: 'DELETE',
+      path: '/objetos/{id}/disponibilidad/{slotId}',
+    },
     search: { method: 'GET', path: '/objetos' },
     detail: { method: 'GET', path: '/objetos/{id}' },
     terms: { method: 'GET', path: '/terminos' },

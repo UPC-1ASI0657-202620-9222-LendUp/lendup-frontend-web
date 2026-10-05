@@ -452,9 +452,32 @@ export const en: Messages = {
     eyebrow: 'Availability',
     back: 'Back to my items',
     description:
-      'Availability must come from the backend and preserve existing and reserved periods.',
-    backendGap:
-      'The backend can add one interval but cannot list, edit or delete existing availability. Management is disabled to avoid overwriting or duplicating periods without authoritative data.',
+      'Manage the periods when you can lend this item. Confirmed reservations are preserved and cannot be edited here.',
+    manage: 'Manage availability',
+    addTitle: 'Add a period',
+    editTitle: 'Edit period',
+    formDescription:
+      'Choose a start and end date. Available periods cannot overlap.',
+    registered: 'Item calendar',
+    availableTitle: 'Available periods',
+    reservedTitle: 'Reserved periods',
+    noAvailable: "You haven't added any available periods yet.",
+    noReserved: 'There are no confirmed reservations for this item.',
+    reservedNote:
+      'Confirmed reservations are read-only and cannot be changed from this screen.',
+    reserved: 'Reserved',
+    add: 'Add period',
+    save: 'Save changes',
+    cancelEdit: 'Cancel editing',
+    edit: 'Edit period',
+    delete: 'Delete period',
+    deleteTitle: 'Delete availability',
+    deleteDescription:
+      'The period {period} will be deleted. Confirmed reservations will not be removed.',
+    deleteConfirm: 'Delete',
+    invalidRange: 'The end date must be after the start date.',
+    pastStart: 'The period must start in the future.',
+    overlap: 'This period overlaps another saved availability period.',
   },
   requests: {
     eyebrow: 'Requests',
@@ -1380,6 +1403,11 @@ export const en: Messages = {
     listing: {
       published: 'Item published.',
       updated: 'Listing updated. Changes apply to new requests.',
+    },
+    availability: {
+      created: 'Availability period added.',
+      updated: 'Availability period updated.',
+      deleted: 'Availability period deleted.',
     },
     request: {
       created: "Request sent. We'll let you know when the lender responds.",
