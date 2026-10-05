@@ -1,4 +1,5 @@
 'use client';
+import { useUniversities } from '@/hooks/use-universities';
 
 import { useMemo, useState } from 'react';
 import {
@@ -83,6 +84,7 @@ import type {
 } from '@/types/domain';
 
 export function ExplorePage() {
+  const { data: universities = [] } = useUniversities();
   const { t } = useI18n();
   const { state } = useLendUp();
   const [params] = useSearchParams();
@@ -102,10 +104,20 @@ export function ExplorePage() {
     queryKey: ['listings', state.listings],
     queryFn: () => catalogService.searchListings(state.listings, filters),
   });
-  const university = findUniversity(filters.universityId);
-  const campuses = university
-    ? university.campuses.map((campus) => campus.name)
-    : Array.from(new Set(data.map((item) => item.campus)));
+  const university = universities.find(
+    (item) => item.id === filters.universityId,
+  );
+  const campuses = Array.from(
+    new Set([
+      ...(university?.campuses.map((campus) => campus.name) ?? []),
+      ...data
+        .filter(
+          (item) =>
+            !filters.universityId || item.universityId === filters.universityId,
+        )
+        .map((item) => item.campus),
+    ]),
+  ).filter(Boolean);
   const invalidPeriod = Boolean(
     filters.from &&
     filters.to &&
@@ -206,7 +218,7 @@ export function ExplorePage() {
             onChange={(event) => update('universityId', event.target.value)}
           >
             <option value="">{t('explore.allUniversities')}</option>
-            {catalogService.universities.map((item) => (
+            {universities.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.shortName}
               </option>
@@ -304,6 +316,7 @@ export function ExplorePage() {
 }
 
 export function ObjectDetailPage() {
+  const { data: universities = [] } = useUniversities();
   const { t, formatMoney, formatDateTime } = useI18n();
   const { id } = useParams();
   const { state } = useLendUp();
@@ -341,7 +354,9 @@ export function ObjectDetailPage() {
   const reserved = item.availabilitySlots.filter(
     (slot) => slot.status === 'RESERVED' && new Date(slot.endAt) > new Date(),
   );
-  const university = findUniversity(item.universityId);
+  const university = universities.find(
+    (candidate) => candidate.id === item.universityId,
+  );
 
   return (
     <>
@@ -478,7 +493,7 @@ export function ObjectDetailPage() {
             user={owner}
             detail={
               owner
-                ? `${findUniversity(owner.universityId)?.shortName} · ${owner.campus}`
+                ? `${universities.find((candidate) => candidate.id === owner.universityId)?.shortName ?? owner.universityId} · ${owner.campus}`
                 : undefined
             }
           />
@@ -806,6 +821,7 @@ export function MyItemsPage() {
 }
 
 export function ListingFormPage({ edit = false }: { edit?: boolean }) {
+  const { data: universities = [] } = useUniversities();
   const { t } = useI18n();
   const { id } = useParams();
   const { state, createListing, updateListing } = useLendUp();
@@ -887,7 +903,6 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
           guaranteeAmount: 0,
         },
   });
-  const university = findUniversity(watch('universityId'));
   if (edit && !existing)
     return (
       <NotFound
@@ -1028,7 +1043,7 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
                 })}
               >
                 <option value="">{t('common.selectOption')}</option>
-                {catalogService.universities.map((item) => (
+                {universities.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.shortName}
                   </option>
@@ -1040,25 +1055,7 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
               error={errors.campus?.message}
               required
             >
-              <select
-                {...register('campus', {
-                  onChange: (event) =>
-                    setValue(
-                      'location',
-                      university?.campuses.find(
-                        (c) => c.name === event.target.value,
-                      )?.district ?? '',
-                    ),
-                })}
-                disabled={!university}
-              >
-                <option value="">{t('common.selectOption')}</option>
-                {university?.campuses.map((campus) => (
-                  <option key={campus.id} value={campus.name}>
-                    {campus.name}
-                  </option>
-                ))}
-              </select>
+              <input maxLength={150} {...register('campus')} />
             </Field>
             {text('location', t('fields.district'))}
             {text('exchangePlace', t('fields.exchangePlace'), {

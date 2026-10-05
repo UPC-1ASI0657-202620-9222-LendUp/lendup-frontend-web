@@ -43,5 +43,8 @@ export const backendCatalogService = {
       body: { estado },
     }),
   terms: (signal?: AbortSignal) =>
-    gatewayRequest<TermsDocumentDto>(endpoints.catalog.terms, { signal }),
+    gatewayRequest<TermsDocumentDto>(endpoints.catalog.terms, {
+      signal,
+      public: true,
+    }),
 };

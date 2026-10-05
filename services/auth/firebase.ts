@@ -1,5 +1,5 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { connectAuthEmulator, getAuth } from 'firebase/auth';
 import { firebasePublicConfig } from '@/config/app-config';
 
 const required = [
@@ -18,3 +18,9 @@ const app = firebaseConfigured
   : null;
 
 export const firebaseAuth = app ? getAuth(app) : null;
+
+const emulatorUrl =
+  import.meta.env.DEV && import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_URL;
+if (firebaseAuth && emulatorUrl && !firebaseAuth.emulatorConfig) {
+  connectAuthEmulator(firebaseAuth, emulatorUrl, { disableWarnings: true });
+}

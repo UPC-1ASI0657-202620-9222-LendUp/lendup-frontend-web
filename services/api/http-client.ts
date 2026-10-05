@@ -64,9 +64,10 @@ export async function gatewayRequest<T>(
     query?: Query;
     body?: unknown;
     signal?: AbortSignal;
+    public?: boolean;
   } = {},
 ): Promise<T> {
-  const token = await authService.idToken();
+  const token = options.public ? null : await authService.idToken();
   let response: Response;
   try {
     response = await fetch(buildUrl(endpoint, options.params, options.query), {
@@ -107,7 +108,7 @@ export async function gatewayRequest<T>(
                   : response.status >= 500
                     ? 'SERVER_ERROR'
                     : 'UNKNOWN';
-    if (response.status === 401)
+    if (response.status === 401 && !options.public)
       await authService.logout().catch(() => undefined);
     throw new DomainError(code, {
       status: response.status,

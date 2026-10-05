@@ -110,6 +110,13 @@ export const en: Messages = {
       cta: 'Create account',
       submit: 'Create my account',
       submitting: 'Creating account…',
+      detectedHint: 'Your university is identified from your email domain.',
+      detectedPlaceholder: 'Enter your university email',
+      unknownDomain:
+        'We do not recognize your university email domain yet. Request that it be added.',
+      catalogFailed: 'We could not load the universities. Retry to continue.',
+      campusOptional: 'Optional. Enter your campus if you wish.',
+      campusLength: 'Campus allows up to 150 characters.',
       domainHint: 'Use your university email ({domains}).',
       phoneHint:
         'Only shared with your counterpart during an active reservation.',

@@ -59,7 +59,7 @@ import {
   today,
   zonedDayKey,
 } from '@/lib/dates';
-import { findUniversity } from '@/services/catalog.service';
+import { useUniversities } from '@/hooks/use-universities';
 import { useLendUp, type ActionResult } from '@/hooks/use-lendup';
 import {
   currentUserOf,
@@ -1014,7 +1014,9 @@ function ProfileContent({ user, own }: { user: User; own: boolean }) {
   const { t, formatDate } = useI18n();
   const { state } = useLendUp();
   const reputation = reputationOf(state, user.id);
-  const university = findUniversity(user.universityId);
+  const university = useUniversities().data?.find(
+    (item) => item.id === user.universityId,
+  );
   const distribution = [5, 4, 3, 2, 1].map((stars) => ({
     stars,
     count: reputation.ratings.filter((rating) => rating.stars === stars).length,
@@ -1033,7 +1035,8 @@ function ProfileContent({ user, own }: { user: User; own: boolean }) {
           {university && (
             <li>
               <CheckCircle2 aria-hidden="true" />
-              {university.shortName} · {user.campus}
+              {university.shortName}
+              {user.campus ? ` · ${user.campus}` : ''}
             </li>
           )}
         </ul>
@@ -1127,7 +1130,7 @@ function ProfileEditDialog({
 }) {
   const { t } = useI18n();
   const { updateProfile } = useLendUp();
-  const university = findUniversity(user.universityId);
+
   const avatar = user.avatar ?? '';
   const schema = useMemo(
     () =>
@@ -1140,7 +1143,7 @@ function ProfileEditDialog({
           .string()
           .trim()
           .regex(/^(1[0-4]|[1-9])$/, t('validation.cycle')),
-        campus: z.string().min(1, t('validation.select')),
+        campus: z.string().trim().max(150, t('auth.register.campusLength')),
         phone: z
           .string()
           .trim()
@@ -1214,15 +1217,9 @@ function ProfileEditDialog({
           <Field
             label={t('fields.campus')}
             error={errors.campus?.message}
-            required
+            hint={t('auth.register.campusOptional')}
           >
-            <select {...register('campus')}>
-              {university?.campuses.map((campus) => (
-                <option key={campus.id} value={campus.name}>
-                  {campus.name}
-                </option>
-              ))}
-            </select>
+            <input maxLength={150} {...register('campus')} />
           </Field>
           <Field
             label={t('fields.phone')}

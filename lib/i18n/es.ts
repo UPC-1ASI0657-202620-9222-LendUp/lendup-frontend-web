@@ -111,6 +111,14 @@ export const es = {
       cta: 'Crear cuenta',
       submit: 'Crear mi cuenta',
       submitting: 'Creando cuenta…',
+      detectedHint: 'La universidad se identifica por el dominio de tu correo.',
+      detectedPlaceholder: 'Introduce tu correo institucional',
+      unknownDomain:
+        'Todavía no reconocemos el dominio de tu universidad. Solicita que lo añadamos.',
+      catalogFailed:
+        'No pudimos cargar las universidades. Reintenta para continuar.',
+      campusOptional: 'Opcional. Escribe tu sede o campus si deseas indicarlo.',
+      campusLength: 'La sede admite hasta 150 caracteres.',
       domainHint: 'Usa tu correo institucional ({domains}).',
       phoneHint:
         'Solo se comparte con tu contraparte durante una reserva vigente.',

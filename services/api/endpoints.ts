@@ -1,4 +1,5 @@
 export const endpoints = {
+  reference: { universities: { method: 'GET', path: '/universidades' } },
   identity: {
     register: { method: 'POST', path: '/estudiantes' },
     me: { method: 'GET', path: '/estudiantes/me' },

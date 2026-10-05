@@ -1,11 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import {
-  Link,
-  useNavigate,
-  useSearchParams,
-} from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useQueryClient } from '@tanstack/react-query';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -22,8 +18,8 @@ import { translate, useI18n, type MessageKey } from '@/lib/i18n';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { authService } from '@/services/auth/auth.service';
-import { isInstitutionalEmail } from '@/lib/business-rules';
-import { catalogService, findUniversity } from '@/services/catalog.service';
+import { universityForEmail } from '@/lib/university-domain';
+import { useUniversities } from '@/hooks/use-universities';
 import { useLendUp, type ActionResult } from '@/hooks/use-lendup';
 import { currentUserOf, termsAcceptedBy } from '@/stores/selectors';
 
@@ -191,14 +187,15 @@ export function RegisterPage() {
   const { t } = useI18n();
   const { registerUser, firebaseUser, profileMissing, logout } = useLendUp();
   const completingProfile = Boolean(firebaseUser);
+  const universitiesQuery = useUniversities();
+  const universities = universitiesQuery.data;
   const [result, setResult] = useState<ActionResult | null>(null);
   const schema = useMemo(
     () =>
       z
         .object({
           name: z.string().trim().min(5, t('validation.fullName')),
-          universityId: z.string().min(1, t('validation.select')),
-          campus: z.string().min(1, t('validation.select')),
+          campus: z.string().trim().max(150, t('auth.register.campusLength')),
           career: z
             .string()
             .trim()
@@ -235,16 +232,13 @@ export function RegisterPage() {
         )
         .refine(
           (value) =>
-            isInstitutionalEmail(
-              value.email,
-              findUniversity(value.universityId),
-            ),
+            Boolean(universityForEmail(value.email, universities ?? [])),
           {
             path: ['email'],
-            message: t('validation.institutionalEmail'),
+            message: t('auth.register.unknownDomain'),
           },
         ),
-    [t, completingProfile],
+    [t, completingProfile, universities],
   );
   type Values = z.input<typeof schema>;
   const {
@@ -256,7 +250,6 @@ export function RegisterPage() {
   } = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: {
-      universityId: '',
       campus: '',
       cycle: '',
       password: '',
@@ -267,8 +260,8 @@ export function RegisterPage() {
   useEffect(() => {
     if (firebaseUser?.email) setValue('email', firebaseUser.email);
   }, [firebaseUser?.email, setValue]);
-  const universityId = watch('universityId');
-  const university = findUniversity(universityId);
+  const email = watch('email');
+  const university = universityForEmail(email ?? '', universities ?? []);
 
   return (
     <AuthFrame
@@ -294,7 +287,7 @@ export function RegisterPage() {
             name: values.name,
             email: values.email,
             phone: values.phone,
-            universityId: values.universityId,
+            universityId: university?.id ?? '',
             campus: values.campus,
             career: values.career,
             cycle: String(values.cycle),
@@ -310,54 +303,6 @@ export function RegisterPage() {
           wide
         >
           <input autoComplete="name" {...register('name')} />
-        </Field>
-        <Field
-          label={t('fields.university')}
-          error={errors.universityId?.message}
-          required
-        >
-          <select
-            {...register('universityId', {
-              onChange: () => setValue('campus', ''),
-            })}
-          >
-            <option value="">{t('common.selectOption')}</option>
-            {catalogService.universities.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.shortName} — {item.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field
-          label={t('fields.campus')}
-          error={errors.campus?.message}
-          required
-        >
-          <select {...register('campus')} disabled={!university}>
-            <option value="">{t('common.selectOption')}</option>
-            {university?.campuses.map((campus) => (
-              <option key={campus.id} value={campus.name}>
-                {campus.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field
-          label={t('fields.career')}
-          error={errors.career?.message}
-          required
-        >
-          <input {...register('career')} />
-        </Field>
-        <Field label={t('fields.cycle')} error={errors.cycle?.message} required>
-          <input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={14}
-            {...register('cycle')}
-          />
         </Field>
         <Field
           label={t('fields.institutionalEmail')}
@@ -379,6 +324,57 @@ export function RegisterPage() {
             inputMode="email"
             readOnly={completingProfile}
             {...register('email')}
+          />
+        </Field>
+        <Field
+          label={t('fields.university')}
+          hint={t('auth.register.detectedHint')}
+        >
+          <input
+            readOnly
+            value={university?.name ?? ''}
+            placeholder={t('auth.register.detectedPlaceholder')}
+          />
+          {universitiesQuery.isLoading && (
+            <output>{t('common.loading')}</output>
+          )}
+          {universitiesQuery.isError && (
+            <div role="alert">
+              <p>{t('auth.register.catalogFailed')}</p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void universitiesQuery.refetch()}
+              >
+                {t('common.retry')}
+              </Button>
+            </div>
+          )}
+          {universities && email?.includes('@') && !university && (
+            <output>{t('auth.register.unknownDomain')}</output>
+          )}
+        </Field>
+        <Field
+          label={t('fields.campus')}
+          error={errors.campus?.message}
+          hint={t('auth.register.campusOptional')}
+        >
+          <input maxLength={150} {...register('campus')} />
+        </Field>
+        <Field
+          label={t('fields.career')}
+          error={errors.career?.message}
+          required
+        >
+          <input {...register('career')} />
+        </Field>
+        <Field label={t('fields.cycle')} error={errors.cycle?.message} required>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={14}
+            {...register('cycle')}
           />
         </Field>
         <Field
@@ -423,7 +419,11 @@ export function RegisterPage() {
         )}
         <div className="full-span">
           <Feedback result={result && !result.ok ? result : null} />
-          <Button type="submit" size="lg" disabled={isSubmitting}>
+          <Button
+            type="submit"
+            size="lg"
+            disabled={isSubmitting || !university || universitiesQuery.isError}
+          >
             {isSubmitting
               ? t('auth.register.submitting')
               : t(

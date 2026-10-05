@@ -14,8 +14,8 @@ export interface BackendErrorDto {
 export interface CreateStudentRequestDto {
   correo_institucional: string;
   nombre: string;
-  universidad: string;
-  campus: string;
+  universidad?: string;
+  campus?: string;
   carrera: string;
   ciclo: number;
   telefono: string;

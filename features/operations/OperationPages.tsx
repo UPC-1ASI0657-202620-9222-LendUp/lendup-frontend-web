@@ -147,7 +147,7 @@ function PartyCard({
       <UserChip
         user={user}
         link
-        detail={`${findUniversity(user.universityId)?.shortName ?? ''} · ${user.campus}`}
+        detail={`${findUniversity(user.universityId)?.shortName ?? user.universityId} · ${user.campus}`}
       />
       <Reputation value={reputation.average} count={reputation.count} />
       {showPhone ? (
@@ -391,7 +391,7 @@ function RequestCard({
                   [t('profile.completedLoans'), reputation.completedLoans],
                   [
                     t('fields.university'),
-                    `${findUniversity(person.universityId)?.shortName ?? ''} · ${person.campus}`,
+                    `${findUniversity(person.universityId)?.shortName ?? person.universityId} · ${person.campus}`,
                   ],
                 ]}
               />

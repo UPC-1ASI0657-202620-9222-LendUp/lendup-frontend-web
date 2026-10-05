@@ -38,7 +38,7 @@ import { Brand } from '@/components/lendup/Brand';
 import { LanguageSwitcher } from '@/components/lendup/LanguageSwitcher';
 import { Avatar } from '@/components/lendup/shared';
 import { useI18n, type MessageKey } from '@/lib/i18n';
-import { findUniversity } from '@/services/catalog.service';
+import { useUniversities } from '@/hooks/use-universities';
 import { useLendUp } from '@/hooks/use-lendup';
 import { currentUserOf, termsAcceptedBy } from '@/stores/selectors';
 import type { Role } from '@/types/domain';
@@ -109,6 +109,7 @@ const mobilePrimary: Record<Role, string[]> = {
 };
 
 export function AppShell() {
+  const { data: universities = [] } = useUniversities();
   const { state, logout } = useLendUp();
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -123,7 +124,9 @@ export function AppShell() {
   const unread = state.notifications.filter(
     (item) => item.userId === current.id && !item.read,
   ).length;
-  const university = findUniversity(current.universityId);
+  const university = universities.find(
+    (item) => item.id === current.universityId,
+  );
   const needsTerms =
     current.role === 'STUDENT' && !termsAcceptedBy(state, current.id);
 
