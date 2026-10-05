@@ -14,6 +14,7 @@ import { authService } from '@/services/auth/auth.service';
 interface AuthContextValue {
   user: FirebaseUser | null;
   ready: boolean;
+  emailVerified: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -22,18 +23,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<FirebaseUser | null>(() =>
     authService.currentUser(),
   );
+  const [emailVerified, setEmailVerified] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(
     () =>
       authService.subscribe((next) => {
         setUser(next);
+        setEmailVerified(Boolean(next?.emailVerified));
         setReady(true);
       }),
     [],
   );
 
-  const value = useMemo(() => ({ user, ready }), [user, ready]);
+  const value = useMemo(
+    () => ({ user, ready, emailVerified }),
+    [user, ready, emailVerified],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

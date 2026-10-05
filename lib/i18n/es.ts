@@ -98,6 +98,13 @@ export const es = {
       noAccount: '¿Aún no tienes cuenta?',
     },
     register: {
+      completeTitle: 'Completa tu perfil universitario',
+      completeDescription:
+        'Tu cuenta ya existe. Guarda los datos que faltan para acceder a LendUp.',
+      recoveryNotice:
+        'No se completó el registro de tu perfil. Puedes reintentar sin crear otra cuenta ni cambiar tu contraseña.',
+      completeSubmit: 'Guardar mi perfil',
+      changeAccount: 'Usar otra cuenta',
       title: 'Crea tu cuenta universitaria',
       description:
         'Tu correo institucional será la identidad de acceso asociada a tu perfil universitario.',
@@ -116,6 +123,16 @@ export const es = {
         'El siguiente paso es solicitar la verificación de tu condición de estudiante para poder publicar y solicitar objetos.',
     },
     verify: {
+      linkTitle: 'Verifica tu correo para ingresar',
+      linkDescription: 'Verifica el correo {email} para acceder a LendUp.',
+      linkInstructions:
+        'Abre el enlace en tu correo y luego pulsa «Ya verifiqué mi correo». Revisa también la carpeta de spam. Si no recibiste el mensaje, puedes reenviarlo.',
+      linkCheck: 'Ya verifiqué mi correo',
+      linkSent: 'Enlace enviado. Revisa tu correo.',
+      linkPending:
+        'Tu correo todavía no está verificado. Abre el enlace recibido e inténtalo nuevamente.',
+      linkError:
+        'No pudimos completar la solicitud. Espera un momento y vuelve a intentarlo.',
       title: 'Solicita la verificación estudiantil',
       description:
         'Tu cuenta usa el correo institucional {email}. Registra una referencia válida para que el backend procese la verificación.',

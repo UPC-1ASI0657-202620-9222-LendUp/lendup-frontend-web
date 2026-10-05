@@ -1,24 +1,27 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Link,
-  useLocation,
   useNavigate,
   useSearchParams,
 } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
+import { useQueryClient } from '@tanstack/react-query';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { CheckCircle2, MailCheck, ShieldCheck } from 'lucide-react';
+import { CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Brand } from '@/components/lendup/Brand';
 import { LanguageSwitcher } from '@/components/lendup/LanguageSwitcher';
 import { Field } from '@/components/lendup/forms';
-import { Feedback, PageHeader, StatusBadge } from '@/components/lendup/shared';
+import { Feedback, PageHeader } from '@/components/lendup/shared';
 import { TermsAcceptance, TermsDocument } from '@/components/lendup/terms';
 import { supportedLocales } from '@/config/app-config';
 import { translate, useI18n, type MessageKey } from '@/lib/i18n';
+import { Navigate } from 'react-router-dom';
+import { useAuth } from '@/features/auth/AuthProvider';
+import { authService } from '@/services/auth/auth.service';
 import { isInstitutionalEmail } from '@/lib/business-rules';
 import { catalogService, findUniversity } from '@/services/catalog.service';
 import { useLendUp, type ActionResult } from '@/hooks/use-lendup';
@@ -186,7 +189,8 @@ export function LoginPage() {
 
 export function RegisterPage() {
   const { t } = useI18n();
-  const { registerUser } = useLendUp();
+  const { registerUser, firebaseUser, profileMissing, logout } = useLendUp();
+  const completingProfile = Boolean(firebaseUser);
   const [result, setResult] = useState<ActionResult | null>(null);
   const schema = useMemo(
     () =>
@@ -211,15 +215,24 @@ export function RegisterPage() {
             .regex(/^\+?\d[\d\s]{8,14}$/, t('validation.phone')),
           password: z
             .string()
-            .min(8, t('validation.passwordLength'))
-            .regex(/[A-Za-z]/, t('validation.passwordLetter'))
-            .regex(/\d/, t('validation.passwordNumber')),
+            .min(completingProfile ? 0 : 8, t('validation.passwordLength'))
+            .refine(
+              (value) => completingProfile || /[A-Za-z]/.test(value),
+              t('validation.passwordLetter'),
+            )
+            .refine(
+              (value) => completingProfile || /\d/.test(value),
+              t('validation.passwordNumber'),
+            ),
           confirm: z.string(),
         })
-        .refine((value) => value.password === value.confirm, {
-          path: ['confirm'],
-          message: t('validation.passwordMatch'),
-        })
+        .refine(
+          (value) => completingProfile || value.password === value.confirm,
+          {
+            path: ['confirm'],
+            message: t('validation.passwordMatch'),
+          },
+        )
         .refine(
           (value) =>
             isInstitutionalEmail(
@@ -231,7 +244,7 @@ export function RegisterPage() {
             message: t('validation.institutionalEmail'),
           },
         ),
-    [t],
+    [t, completingProfile],
   );
   type Values = z.input<typeof schema>;
   const {
@@ -242,17 +255,36 @@ export function RegisterPage() {
     formState: { errors, isSubmitting },
   } = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { universityId: '', campus: '', cycle: '' },
+    defaultValues: {
+      universityId: '',
+      campus: '',
+      cycle: '',
+      password: '',
+      confirm: '',
+      email: firebaseUser?.email ?? '',
+    },
   });
+  useEffect(() => {
+    if (firebaseUser?.email) setValue('email', firebaseUser.email);
+  }, [firebaseUser?.email, setValue]);
   const universityId = watch('universityId');
   const university = findUniversity(universityId);
 
   return (
     <AuthFrame
       wide
-      title={t('auth.register.title')}
-      description={t('auth.register.description')}
+      title={t(
+        completingProfile
+          ? 'auth.register.completeTitle'
+          : 'auth.register.title',
+      )}
+      description={t(
+        completingProfile
+          ? 'auth.register.completeDescription'
+          : 'auth.register.description',
+      )}
     >
+      {profileMissing && <output>{t('auth.register.recoveryNotice')}</output>}
       <form
         noValidate
         className="auth-form form-grid"
@@ -345,6 +377,7 @@ export function RegisterPage() {
             type="email"
             autoComplete="email"
             inputMode="email"
+            readOnly={completingProfile}
             {...register('email')}
           />
         </Field>
@@ -361,40 +394,57 @@ export function RegisterPage() {
             {...register('phone')}
           />
         </Field>
-        <Field
-          label={t('fields.password')}
-          error={errors.password?.message}
-          hint={t('auth.register.passwordHint')}
-          required
-        >
-          <input
-            type="password"
-            autoComplete="new-password"
-            {...register('password')}
-          />
-        </Field>
-        <Field
-          label={t('fields.confirmPassword')}
-          error={errors.confirm?.message}
-          required
-        >
-          <input
-            type="password"
-            autoComplete="new-password"
-            {...register('confirm')}
-          />
-        </Field>
+        {!completingProfile && (
+          <>
+            <Field
+              label={t('fields.password')}
+              error={errors.password?.message}
+              hint={t('auth.register.passwordHint')}
+              required
+            >
+              <input
+                type="password"
+                autoComplete="new-password"
+                {...register('password')}
+              />
+            </Field>
+            <Field
+              label={t('fields.confirmPassword')}
+              error={errors.confirm?.message}
+              required
+            >
+              <input
+                type="password"
+                autoComplete="new-password"
+                {...register('confirm')}
+              />
+            </Field>
+          </>
+        )}
         <div className="full-span">
           <Feedback result={result && !result.ok ? result : null} />
           <Button type="submit" size="lg" disabled={isSubmitting}>
             {isSubmitting
               ? t('auth.register.submitting')
-              : t('auth.register.submit')}
+              : t(
+                  completingProfile
+                    ? 'auth.register.completeSubmit'
+                    : 'auth.register.submit',
+                )}
           </Button>
           <p className="auth-switch">
             {t('auth.register.termsNotice')}{' '}
             <Link to="/terms">{t('auth.register.termsLink')}</Link>
           </p>
+          {completingProfile && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void logout()}
+            >
+              {t('auth.register.changeAccount')}
+            </Button>
+          )}
           <p className="auth-switch">
             {t('auth.register.haveAccount')}{' '}
             <Link to="/login">{t('auth.login.submit')}</Link>
@@ -407,75 +457,59 @@ export function RegisterPage() {
 
 export function VerifyEmailPage() {
   const { t } = useI18n();
+  const { user, ready, emailVerified } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
-  const registered = Boolean(
-    (location.state as { registered?: boolean } | null)?.registered,
-  );
-  const { state, requestVerification } = useLendUp();
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
-  const [reference, setReference] = useState('');
-  const user = currentUserOf(state);
-  if (!user) return null;
-  const status = user.verificationStatus;
-  const next = termsAcceptedBy(state, user.id) ? '/app' : '/terms?next=/app';
-
+  if (!ready) return null;
+  if (!user) return <Navigate to="/login" replace />;
+  if (emailVerified) return <Navigate to="/app" replace />;
+  const run = async (check: boolean) => {
+    setBusy(true);
+    try {
+      if (check) {
+        if (await authService.refreshVerification()) {
+          await queryClient.invalidateQueries({ queryKey: ['me'] });
+          navigate('/app', { replace: true });
+        } else setResult({ ok: false, message: 'auth.verify.linkPending' });
+      } else {
+        await authService.sendVerification();
+        setResult({ ok: true, message: 'auth.verify.linkSent' });
+      }
+    } catch {
+      setResult({ ok: false, message: 'auth.verify.linkError' });
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <AuthFrame
-      title={t('auth.verify.title')}
-      description={t('auth.verify.description', { email: user.email })}
+      title={t('auth.verify.linkTitle')}
+      description={t('auth.verify.linkDescription', {
+        email: user.email ?? '',
+      })}
     >
-      {registered && (
-        <div className="app-banner success">
-          <CheckCircle2 aria-hidden="true" />
-          <p>
-            <strong>{t('auth.register.successTitle')}</strong>{' '}
-            {t('auth.register.successNext')}
-          </p>
-        </div>
-      )}
-      <div className="verification-card">
-        <span className="verification-icon" aria-hidden="true">
-          {user.verified ? <ShieldCheck /> : <MailCheck />}
-        </span>
-        <StatusBadge kind="verification" status={status} />
-        <p>{t(`auth.verify.messages.${status}`)}</p>
-        <Feedback result={result} />
-        {user.verified ? (
-          <Button size="lg" onClick={() => navigate(next)}>
-            {t('auth.verify.continue')}
-          </Button>
-        ) : (
-          <>
-            <Field
-              label={t('auth.verify.referenceLabel')}
-              hint={t('auth.verify.referenceHint')}
-              required
-            >
-              <input
-                value={reference}
-                onChange={(event) => setReference(event.target.value)}
-                placeholder={t('auth.verify.referencePlaceholder')}
-                autoComplete="off"
-              />
-            </Field>
-            <Button
-              type="button"
-              variant={status === 'PENDING' ? 'outline' : 'default'}
-              disabled={!reference.trim()}
-              onClick={async () =>
-                setResult(await requestVerification(reference))
-              }
-            >
-              {status === 'PENDING'
-                ? t('auth.verify.resend')
-                : t('auth.verify.send')}
-            </Button>
-            <Button variant="ghost" render={<Link to="/app" />}>
-              {t('auth.verify.later')}
-            </Button>
-          </>
-        )}
+      <p>{t('auth.verify.linkInstructions')}</p>
+      <Feedback result={result} />
+      <div className="button-row">
+        <Button disabled={busy} onClick={() => void run(true)}>
+          {t('auth.verify.linkCheck')}
+        </Button>
+        <Button
+          variant="outline"
+          disabled={busy}
+          onClick={() => void run(false)}
+        >
+          {t('auth.verify.resend')}
+        </Button>
+        <Button
+          variant="ghost"
+          disabled={busy}
+          onClick={() => void authService.logout()}
+        >
+          {t('auth.register.changeAccount')}
+        </Button>
       </div>
     </AuthFrame>
   );

@@ -80,8 +80,8 @@ function AppRoutes() {
           <Route path="/register" element={<RegisterPage />} />
         </Route>
         <Route path="/terms" element={<TermsPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route element={<ProtectedRoute />}>
-          <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route element={<AppShell />}>
             <Route path="/app" element={<DashboardPage />} />
             <Route element={<StudentRoute />}>

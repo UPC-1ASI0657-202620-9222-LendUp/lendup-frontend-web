@@ -1,6 +1,8 @@
 import {
   createUserWithEmailAndPassword,
-  onAuthStateChanged,
+  onIdTokenChanged,
+  sendEmailVerification,
+  reload,
   signInWithEmailAndPassword,
   signOut,
   type User as FirebaseUser,
@@ -25,12 +27,27 @@ export const authService = {
       listener(null);
       return () => undefined;
     }
-    return onAuthStateChanged(firebaseAuth, listener);
+    return onIdTokenChanged(firebaseAuth, listener);
   },
   login: async (email: string, password: string) =>
     (await signInWithEmailAndPassword(auth(), email, password)).user,
   register: async (email: string, password: string) =>
     (await createUserWithEmailAndPassword(auth(), email, password)).user,
+  sendVerification: async () => {
+    const user = auth().currentUser;
+    if (!user) throw new Error('No active session');
+    if (!user.emailVerified)
+      await sendEmailVerification(user, {
+        url: window.location.origin + '/verify-email',
+      });
+  },
+  refreshVerification: async () => {
+    const user = auth().currentUser;
+    if (!user) return false;
+    await reload(user);
+    await user.getIdToken(true);
+    return user.emailVerified;
+  },
   logout: async () => signOut(auth()),
   idToken: async (forceRefresh = false) =>
     firebaseAuth?.currentUser?.getIdToken(forceRefresh) ?? null,

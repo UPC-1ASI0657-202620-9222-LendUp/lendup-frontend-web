@@ -20,9 +20,19 @@ import { currentUserOf } from '@/stores/selectors';
 import type { Role } from '@/types/domain';
 
 export function ProtectedRoute() {
-  const { state, hydrated, profileMissing, profileError, retryProfile } =
-    useLendUp();
+  const {
+    state,
+    hydrated,
+    profileMissing,
+    profileError,
+    retryProfile,
+    firebaseUser,
+    emailVerified,
+    authReady,
+  } = useLendUp();
   const location = useLocation();
+  if (authReady && firebaseUser && !emailVerified)
+    return <Navigate to="/verify-email" replace />;
   if (!hydrated) return <LoadingSkeleton />;
   if (profileError) return <ErrorState onRetry={() => void retryProfile()} />;
   if (profileMissing) return <Navigate to="/register" replace />;
@@ -50,16 +60,28 @@ export const AdminRoute = () => <RoleRoute allowed="ADMIN" />;
 export const StudentRoute = () => <RoleRoute allowed="STUDENT" />;
 
 export function PublicOnlyRoute() {
-  const { state, hydrated, profileMissing, profileError, retryProfile } =
-    useLendUp();
+  const {
+    state,
+    hydrated,
+    profileMissing,
+    profileError,
+    retryProfile,
+    firebaseUser,
+  } = useLendUp();
   const location = useLocation();
-  if (!hydrated) return <LoadingSkeleton />;
+  if (!hydrated) {
+    if (firebaseUser && location.pathname === '/register') return <Outlet />;
+    return <LoadingSkeleton />;
+  }
   if (profileError) return <ErrorState onRetry={() => void retryProfile()} />;
   if (
     !state.authenticated ||
     (profileMissing && location.pathname === '/register')
   )
     return <Outlet />;
+  if (profileMissing) return <Navigate to="/register" replace />;
+  if (!state.users.find((user) => user.id === state.currentUserId)?.verified)
+    return <Navigate to="/verify-email" replace />;
   const user = currentUserOf(state);
   const registered = location.pathname === '/register';
   const from = (location.state as { from?: string } | null)?.from;

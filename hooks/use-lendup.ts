@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { isMissingProfile } from '@/lib/profile-recovery';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
 import { FirebaseError } from 'firebase/app';
@@ -143,11 +144,11 @@ const incidentType = (type: Incident['type']) =>
   })[type];
 
 export function useLendUp() {
-  const { user: firebaseUser, ready } = useAuth();
+  const { user: firebaseUser, ready, emailVerified } = useAuth();
   const location = useLocation();
   const queryClient = useQueryClient();
   const meQuery = useQuery({
-    queryKey: queryKeys.me,
+    queryKey: [...queryKeys.me, firebaseUser?.uid],
     queryFn: ({ signal }) => identityService.me(signal),
     enabled: Boolean(firebaseUser),
     retry: false,
@@ -155,7 +156,7 @@ export function useLendUp() {
   const currentUser = meQuery.data
     ? mapCurrentStudent(meQuery.data)
     : undefined;
-  const enabled = Boolean(currentUser);
+  const enabled = Boolean(currentUser) && emailVerified;
 
   const listingsQuery = useQuery({
     queryKey: queryKeys.listings,
@@ -392,6 +393,9 @@ export function useLendUp() {
         ciclo: Number(data.cycle),
         telefono: data.phone,
       });
+      if (!authService.currentUser()?.emailVerified) {
+        await authService.sendVerification().catch(() => undefined);
+      }
       await invalidate(queryKeys.me);
       return success('results.auth.registered', String(result.id ?? ''));
     } catch (reason) {
@@ -651,6 +655,9 @@ export function useLendUp() {
   };
 
   return {
+    firebaseUser,
+    emailVerified,
+    authReady: ready,
     state,
     hydrated: ready && (!firebaseUser || !meQuery.isLoading),
     dataLoading:
@@ -663,18 +670,9 @@ export function useLendUp() {
         incidentDetailQuery,
         ...transactionQueries,
       ].some((query) => query.isLoading),
-    profileMissing: Boolean(
-      firebaseUser &&
-      meQuery.error instanceof DomainError &&
-      meQuery.error.code === 'FORBIDDEN',
-    ),
+    profileMissing: Boolean(firebaseUser && isMissingProfile(meQuery.error)),
     profileError: Boolean(
-      firebaseUser &&
-      meQuery.isError &&
-      !(
-        meQuery.error instanceof DomainError &&
-        meQuery.error.code === 'FORBIDDEN'
-      ),
+      firebaseUser && meQuery.isError && !isMissingProfile(meQuery.error),
     ),
     retryProfile: () => meQuery.refetch(),
     termsAvailable,

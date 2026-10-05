@@ -97,6 +97,13 @@ export const en: Messages = {
       noAccount: "Don't have an account yet?",
     },
     register: {
+      completeTitle: 'Complete your university profile',
+      completeDescription:
+        'Your account already exists. Save the missing details to access LendUp.',
+      recoveryNotice:
+        'Your profile registration was not completed. Retry without creating another account or changing your password.',
+      completeSubmit: 'Save my profile',
+      changeAccount: 'Use another account',
       title: 'Create your university account',
       description:
         'Your university email will be the sign-in identity associated with your university profile.',
@@ -115,6 +122,16 @@ export const en: Messages = {
         'The next step is to request verification of your student status so you can publish and request items.',
     },
     verify: {
+      linkTitle: 'Verify your email to enter',
+      linkDescription: 'Verify {email} to access LendUp.',
+      linkInstructions:
+        'Open the link in your email, then click “I verified my email”. Check your spam folder too. You can resend the message if it did not arrive.',
+      linkCheck: 'I verified my email',
+      linkSent: 'Link sent. Check your email.',
+      linkPending:
+        'Your email is not verified yet. Open the link and try again.',
+      linkError:
+        'We could not complete the request. Wait a moment and try again.',
       title: 'Request student verification',
       description:
         'Your account uses the university email {email}. Enter a valid reference for the backend to process the verification.',

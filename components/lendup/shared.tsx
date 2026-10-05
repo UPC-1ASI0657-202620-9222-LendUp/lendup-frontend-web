@@ -4,7 +4,6 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertCircle,
-  BadgeCheck,
   Bell,
   CalendarClock,
   CheckCircle2,
@@ -180,15 +179,7 @@ export function UserChip({
     <div className="user-chip">
       <Avatar user={user} />
       <span>
-        <strong>
-          {name}
-          {user.verified && (
-            <BadgeCheck
-              className="verified"
-              aria-label={t('common.verifiedUser')}
-            />
-          )}
-        </strong>
+        <strong>{name}</strong>
         {detail && <small>{detail}</small>}
       </span>
     </div>

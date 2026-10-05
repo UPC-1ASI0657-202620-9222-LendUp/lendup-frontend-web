@@ -83,3 +83,18 @@ La UI muestra o bloquea estas capacidades de forma explícita; nunca las marca c
 5. Añade el dominio definitivo a los dominios autorizados de Firebase Authentication.
 
 El frontend no puede ni debe eludir CORS desde el navegador.
+
+## Verificación obligatoria de correo
+
+Firebase envía un enlace después de guardar el perfil. La pantalla `/verify-email`
+permite reenviarlo y comprobar la verificación. No se permite acceder a la aplicación
+hasta que Firebase indique `emailVerified=true`; esto también se aplica a cuentas existentes.
+Al comprobar el enlace, se recarga el usuario, se renueva su token y se vuelve a consultar el perfil.
+
+En Firebase Authentication > Settings > Authorized domains debe figurar el dominio publicado
+(sin esquema ni rutas). La plantilla de verificación de Firebase puede personalizarse en Templates.
+La implementación usa el manejador de enlaces alojado por Firebase y vuelve a `/verify-email`.
+
+Desplegar frontend y backend juntos: el backend comprueba `email_verified` en cada solicitud
+protegida y permite exclusivamente las rutas necesarias para completar el perfil antes de verificar.
+No hace falta un proveedor SMTP adicional para este flujo.

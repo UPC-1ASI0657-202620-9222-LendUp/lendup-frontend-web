@@ -1030,14 +1030,6 @@ function ProfileContent({ user, own }: { user: User; own: boolean }) {
           </p>
         )}
         <ul className="profile-badges">
-          <li className={user.verified ? 'ok' : 'pending'}>
-            {user.verified ? (
-              <ShieldCheck aria-hidden="true" />
-            ) : (
-              <Clock3 aria-hidden="true" />
-            )}
-            {user.verified ? t('profile.verified') : t('profile.notVerified')}
-          </li>
           {university && (
             <li>
               <CheckCircle2 aria-hidden="true" />
@@ -1050,14 +1042,6 @@ function ProfileContent({ user, own }: { user: User; own: boolean }) {
             items={[
               [t('fields.institutionalEmail'), user.email],
               [t('fields.phone'), user.phone || '—'],
-              [
-                t('profile.verification'),
-                <StatusBadge
-                  key="v"
-                  kind="verification"
-                  status={user.verificationStatus}
-                />,
-              ],
             ]}
           />
         )}
@@ -1283,11 +1267,6 @@ export function ProfilePage() {
         action={
           user.role === 'STUDENT' && (
             <div className="button-row">
-              {!user.verified && (
-                <Button variant="outline" render={<Link to="/verify-email" />}>
-                  {t('banners.verificationAction')}
-                </Button>
-              )}
               <Button type="button" onClick={() => setOpen(true)}>
                 {t('profile.edit')}
               </Button>

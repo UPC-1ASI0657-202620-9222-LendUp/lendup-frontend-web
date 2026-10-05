@@ -10,7 +10,7 @@
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/business-rules.test.ts",
+    "test": "node --experimental-strip-types --test tests/business-rules.test.ts tests/profile-recovery.test.ts",
     "qa:browser": "node scripts/browser-qa.mjs",
     "qa:flows": "node scripts/flow-qa.mjs",
     "lint": "oxlint",

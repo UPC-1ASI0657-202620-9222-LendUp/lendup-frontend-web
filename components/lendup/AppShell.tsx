@@ -124,7 +124,6 @@ export function AppShell() {
     (item) => item.userId === current.id && !item.read,
   ).length;
   const university = findUniversity(current.universityId);
-  const needsVerification = current.role === 'STUDENT' && !current.verified;
   const needsTerms =
     current.role === 'STUDENT' && !termsAcceptedBy(state, current.id);
 
@@ -232,20 +231,7 @@ export function AppShell() {
           key={location.pathname}
           tabIndex={-1}
         >
-          {needsVerification && (
-            <div className="app-banner warning">
-              <AlertTriangle aria-hidden="true" />
-              <p>{t('banners.verification')}</p>
-              <Button
-                size="sm"
-                variant="outline"
-                render={<Link to="/verify-email" />}
-              >
-                {t('banners.verificationAction')}
-              </Button>
-            </div>
-          )}
-          {!needsVerification && needsTerms && (
+          {needsTerms && (
             <div className="app-banner info">
               <ShieldCheck aria-hidden="true" />
               <p>{t('banners.terms')}</p>
