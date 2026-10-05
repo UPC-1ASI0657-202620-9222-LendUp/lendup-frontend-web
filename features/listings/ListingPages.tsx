@@ -69,6 +69,7 @@ import {
   type ListingFilters,
 } from '@/services/catalog.service';
 import { quoteListing } from '@/services/payments.service';
+import { isPeriodAvailable } from '@/lib/business-rules';
 import { useLendUp, type ActionResult } from '@/hooks/use-lendup';
 import {
   currentUserOf,
@@ -561,15 +562,20 @@ function RequestDialog({
     startIso && endIso && new Date(endIso) > new Date(startIso),
   );
   const future = Boolean(startIso && new Date(startIso) > new Date());
-  // Availability windows are not exposed by the current detail response.
-  // The backend validates the selected period authoritatively on submission.
-  const canSubmit = validRange && future;
+  const periodAvailable = Boolean(
+    validRange &&
+    future &&
+    isPeriodAvailable(item.availabilitySlots, startIso, endIso),
+  );
+  const canSubmit = periodAvailable;
   const breakdown = validRange ? quoteListing(item, startIso, endIso) : null;
   const availabilityMessage = !validRange
     ? t('validation.endAfterStart')
     : !future
       ? t('results.request.pastStart')
-      : t('request.periodValidation');
+      : periodAvailable
+        ? t('request.periodAvailable')
+        : t('request.periodUnavailable');
 
   const submit = async () => {
     const outcome = await createRequest(item.id, startIso, endIso, message);
@@ -607,8 +613,14 @@ function RequestDialog({
               />
             </Field>
           </div>
-          <output className="inline-status warning">
-            <TriangleAlert aria-hidden="true" />
+          <output
+            className={`inline-status ${periodAvailable ? 'success' : 'warning'}`}
+          >
+            {periodAvailable ? (
+              <CheckCircle2 aria-hidden="true" />
+            ) : (
+              <TriangleAlert aria-hidden="true" />
+            )}
             {availabilityMessage}
           </output>
           <div className="terms-review">

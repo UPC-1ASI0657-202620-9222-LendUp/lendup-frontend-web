@@ -1,4 +1,5 @@
 import type { BackendRow, CurrentStudentDto } from '@/services/api/dto/backend';
+import { fromApiLocalDateTime } from '@/lib/dates';
 import type {
   AppNotification,
   Incident,
@@ -97,6 +98,28 @@ const condition = (value: string): Listing['condition'] => {
     : 'GOOD';
 };
 
+function availabilitySlots(row: BackendRow): Listing['availabilitySlots'] {
+  if (!Array.isArray(row.disponibilidades)) return [];
+  return row.disponibilidades.flatMap((value, index) => {
+    if (!value || typeof value !== 'object') return [];
+    const slot = value as BackendRow;
+    const rawStartAt = text(slot, 'desde');
+    const rawEndAt = text(slot, 'hasta');
+    if (!rawStartAt || !rawEndAt) return [];
+    const startAt = fromApiLocalDateTime(rawStartAt);
+    const endAt = fromApiLocalDateTime(rawEndAt);
+    const reserved = text(slot, 'estado') === 'RESERVADA';
+    return [
+      {
+        id: text(slot, 'id') || `availability-${index}`,
+        startAt,
+        endAt,
+        status: reserved ? ('RESERVED' as const) : ('AVAILABLE' as const),
+      },
+    ];
+  });
+}
+
 export function mapListing(row: BackendRow): Listing {
   return {
     id: text(row, 'id'),
@@ -119,7 +142,7 @@ export function mapListing(row: BackendRow): Listing {
           : 'ACTIVE',
     image: '/brand/logo-mark-on-light.webp',
     media: [],
-    availabilitySlots: [],
+    availabilitySlots: availabilitySlots(row),
     terms: {
       usage: text(row, 'condiciones_uso'),
       delivery: text(row, 'condiciones_entrega'),

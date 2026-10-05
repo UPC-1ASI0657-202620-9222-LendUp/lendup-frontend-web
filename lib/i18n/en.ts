@@ -385,8 +385,9 @@ export const en: Messages = {
   request: {
     dialogTitle: 'Review before requesting',
     dialogDescription: 'Loan request for {title}',
-    periodValidation:
-      'The backend will validate the period when the request is submitted because existing availability is not exposed by the API.',
+    periodAvailable: 'The selected period is available.',
+    periodUnavailable:
+      'The selected period is unavailable. Choose a published interval without a confirmed reservation.',
     reviewTitle: 'Terms set by the lender',
     paymentLater:
       'Nothing will be charged now. The amount shown is preliminary; the backend does not yet provide an authoritative total quote or real provider confirmation.',

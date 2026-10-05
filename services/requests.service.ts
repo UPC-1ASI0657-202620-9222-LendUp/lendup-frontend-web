@@ -1,6 +1,7 @@
 import { endpoints } from '@/services/api/endpoints';
 import { gatewayRequest } from '@/services/api/http-client';
 import type { BackendRow } from '@/services/api/dto/backend';
+import { toApiLocalDateTime } from '@/lib/dates';
 
 export const requestsService = {
   list: (
@@ -14,7 +15,11 @@ export const requestsService = {
     }),
   create: (publicacionId: string, desde: string, hasta: string) =>
     gatewayRequest<BackendRow>(endpoints.requests.createRequest, {
-      body: { publicacion_id: publicacionId, desde, hasta },
+      body: {
+        publicacion_id: publicacionId,
+        desde: toApiLocalDateTime(desde),
+        hasta: toApiLocalDateTime(hasta),
+      },
     }),
   accept: (id: string) =>
     gatewayRequest<BackendRow>(endpoints.requests.acceptRequest, {

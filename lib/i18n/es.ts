@@ -389,8 +389,9 @@ export const es = {
   request: {
     dialogTitle: 'Revisa antes de solicitar',
     dialogDescription: 'Solicitud de préstamo para {title}',
-    periodValidation:
-      'El backend validará el periodo al enviar la solicitud porque la disponibilidad existente no está expuesta por la API.',
+    periodAvailable: 'El periodo seleccionado está disponible.',
+    periodUnavailable:
+      'El periodo seleccionado no está disponible. Elige un intervalo publicado que no tenga una reserva confirmada.',
     reviewTitle: 'Condiciones definidas por el prestamista',
     paymentLater:
       'No se realizará ningún cobro ahora. El monto mostrado es preliminar; el backend aún no ofrece una cotización total autoritativa ni confirmación real del proveedor.',

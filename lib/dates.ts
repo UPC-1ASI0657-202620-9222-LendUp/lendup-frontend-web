@@ -81,6 +81,24 @@ export function fromZonedInput(value: string) {
   return new Date(guess - offsetMs(new Date(first))).toISOString();
 }
 
+/**
+ * Serializes an instant using the backend's timezone-less LocalDateTime
+ * contract (`yyyy-MM-ddTHH:mm:ss`) in the configured application timezone.
+ */
+export function toApiLocalDateTime(value: string | Date) {
+  const p = zonedParts(new Date(value));
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}:${pad(p.second)}`;
+}
+
+/** Converts the backend's timezone-less LocalDateTime into an ISO instant. */
+export function fromApiLocalDateTime(value: string) {
+  if (!value) return '';
+  if (value.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(value)) {
+    return new Date(value).toISOString();
+  }
+  return fromZonedInput(value.replace(' ', 'T'));
+}
+
 export function atZonedTime(day: Date | string, hour: number, minute = 0) {
   const key = typeof day === 'string' ? day : zonedDayKey(day);
   return fromZonedInput(`${key}T${pad(hour)}:${pad(minute)}`);
