@@ -864,7 +864,6 @@ function PaymentStep({
   status,
   done,
   locked = false,
-  unsupported = false,
   pending = false,
   onPay,
 }: {
@@ -875,7 +874,6 @@ function PaymentStep({
   status: string;
   done: boolean;
   locked?: boolean;
-  unsupported?: boolean;
   pending?: boolean;
   onPay?: (methodId: string) => Promise<ActionResult>;
 }) {
@@ -913,11 +911,6 @@ function PaymentStep({
           <CalendarClock aria-hidden="true" />
           {t('checkout.providerPending')}
         </p>
-      ) : unsupported ? (
-        <p className="inline-status">
-          <ShieldCheck aria-hidden="true" />
-          {t('common.backendGap')}
-        </p>
       ) : locked ? (
         <p className="inline-status">
           <ShieldCheck aria-hidden="true" />
@@ -954,7 +947,7 @@ function PaymentStep({
 export function CheckoutPage() {
   const { t } = useI18n();
   const { id } = useParams();
-  const { state, holdGuarantee } = useLendUp();
+  const { state, holdGuarantee, payRental } = useLendUp();
   const reservation = state.reservations.find((item) => item.id === id);
   if (!reservation)
     return (
@@ -1033,7 +1026,7 @@ export function CheckoutPage() {
               status={reservation.paymentStatus}
               done={rentalDone}
               locked={!guaranteeDone}
-              unsupported
+              onPay={(method) => payRental(reservation.id, method)}
             />
             <div className="app-banner info">
               <ShieldCheck aria-hidden="true" />
@@ -1058,6 +1051,7 @@ export function DeliveryPage() {
   const { state, recordDelivery } = useLendUp();
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
   const reservation = state.reservations.find(
     (item) => item.id === params.get('reservation'),
@@ -1159,9 +1153,12 @@ export function DeliveryPage() {
             : t('delivery.confirmNoEvidence')
         }
         confirmLabel={t('delivery.confirm')}
+        busy={submitting}
         onConfirm={async () => {
+          setSubmitting(true);
           const outcome = await recordDelivery(reservation.id, evidence);
           setResult(outcome);
+          setSubmitting(false);
           setConfirmOpen(false);
           if (outcome.ok && outcome.id) navigate(`/loans/${outcome.id}`);
         }}

@@ -1205,7 +1205,7 @@ function ProfileEditDialog({
             <div className="field">
               <span className="field-label">{t('profile.avatar')}</span>
               <p className="muted small">
-                {t('uploads.errors.NOT_CONFIGURED')}
+                {t('profile.avatarEditUnavailable')}
               </p>
             </div>
           </div>

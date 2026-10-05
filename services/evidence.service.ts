@@ -3,6 +3,21 @@ import { gatewayRequest } from '@/services/api/http-client';
 import type { BackendRow } from '@/services/api/dto/backend';
 
 export const evidenceService = {
+  upload: (
+    loanId: string,
+    etapa: 'ENTREGA' | 'DEVOLUCION',
+    file: File,
+    uploadId: string,
+  ) => {
+    const body = new FormData();
+    body.append('file', file);
+    body.append('etapa', etapa);
+    body.append('uploadId', uploadId);
+    return gatewayRequest<BackendRow>(endpoints.evidence.upload, {
+      params: { id: loanId },
+      body,
+    });
+  },
   create: (
     loanId: string,
     body: {

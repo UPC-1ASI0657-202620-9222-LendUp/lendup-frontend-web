@@ -1,6 +1,6 @@
 # LendUp frontend web
 
-Frontend de producción de LendUp. Consume exclusivamente la API Spring Boot real y usa Firebase Authentication en el navegador. No contiene usuarios, tokens, pagos, entidades ni persistencia de negocio simulados.
+Frontend de producción de LendUp. Consume exclusivamente la API Spring Boot real y usa Firebase Authentication en el navegador. No contiene usuarios, tokens, entidades ni persistencia de negocio en memoria.
 
 ## Stack y arquitectura
 
@@ -62,8 +62,8 @@ Los DTOs REST conservan nombres `snake_case`; los mappers los convierten al mode
 
 ## Limitaciones conocidas del backend
 
-- Mercado Pago registra pagos y garantías en `PENDIENTE`; el webhook no valida ni confirma al proveedor.
-- Cloudinary no tiene un flujo de subida desde el frontend. Los selectores de archivo permanecen deshabilitados y nunca se generan Data URLs.
+- Los pagos de tarifa y la constitución de garantía se confirman mediante el flujo de pago habilitado por la API.
+- Las evidencias de entrega y devolución se envían al backend, que valida los archivos y los almacena en Cloudinary.
 - Gemini crea análisis en estado pendiente; no hay resultado real ni polling disponible.
 - SendGrid/correo todavía no está integrado.
 - `/terminos` no entrega el documento ni sus versiones vigentes, por lo que una nueva aceptación no puede completarse de forma autoritativa.

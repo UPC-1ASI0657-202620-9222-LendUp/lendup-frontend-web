@@ -1,7 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { BrainCircuit, FileText, Info, Trash2, Video } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  BrainCircuit,
+  FileText,
+  Info,
+  Trash2,
+  UploadCloud,
+  Video,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/lendup/shared';
 import { useI18n, type MessageKey } from '@/lib/i18n';
@@ -22,6 +29,19 @@ export function EvidenceUploader({
 }) {
   const { t } = useI18n();
   const [note, setNote] = useState('');
+  const [fileError, setFileError] = useState('');
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
+  useEffect(
+    () => () => {
+      valueRef.current.forEach((item) => {
+        if (item.file && item.url?.startsWith('blob:'))
+          URL.revokeObjectURL(item.url);
+      });
+    },
+    [],
+  );
 
   const base = () => ({
     phase,
@@ -46,14 +66,78 @@ export function EvidenceUploader({
     setNote('');
   };
 
+  const addFiles = (files: File[]) => {
+    const currentMedia = value.filter((item) => item.type !== 'NOTE').length;
+    if (currentMedia + files.length > 6) {
+      setFileError(t('uploads.errors.LIMIT'));
+      return;
+    }
+    if (
+      files.some(
+        (file) =>
+          ![
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+            'video/mp4',
+            'video/webm',
+            'video/quicktime',
+          ].includes(file.type),
+      )
+    ) {
+      setFileError(t('uploads.errors.FORMAT'));
+      return;
+    }
+    if (files.some((file) => file.size === 0 || file.size > 5 * 1024 * 1024)) {
+      setFileError(t('uploads.errors.SIZE'));
+      return;
+    }
+    setFileError('');
+    onChange([
+      ...value,
+      ...files.map((file) => ({
+        ...base(),
+        id: crypto.randomUUID(),
+        type: file.type.startsWith('video/')
+          ? ('VIDEO' as const)
+          : ('PHOTO' as const),
+        label: file.name,
+        description: '',
+        url: URL.createObjectURL(file),
+        file,
+      })),
+    ]);
+  };
+
+  const remove = (item: Evidence) => {
+    if (item.file && item.url?.startsWith('blob:')) URL.revokeObjectURL(item.url);
+    onChange(value.filter((candidate) => candidate.id !== item.id));
+  };
+
   return (
     <div className="evidence-uploader">
       {phase !== 'INCIDENT' && (
-        <div className="upload-zone" aria-disabled="true">
-          <Info aria-hidden="true" />
+        <label className="upload-zone">
+          <UploadCloud aria-hidden="true" />
           <strong>{label}</strong>
-          <span>{t('uploads.errors.NOT_CONFIGURED')}</span>
-        </div>
+          <span>{t('uploads.hint')}</span>
+          <span className="button-like">{t('uploads.select')}</span>
+          <input
+            className="sr-only"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime"
+            multiple
+            onChange={(event) => {
+              addFiles(Array.from(event.target.files ?? []));
+              event.target.value = '';
+            }}
+          />
+        </label>
+      )}
+      {fileError && (
+        <p className="field-error" role="alert">
+          {fileError}
+        </p>
       )}
       <div className="evidence-note-input">
         <label className="field">
@@ -86,11 +170,7 @@ export function EvidenceUploader({
                 variant="ghost"
                 size="icon"
                 aria-label={t('evidence.remove', { name: item.label })}
-                onClick={() =>
-                  onChange(
-                    value.filter((candidate) => candidate.id !== item.id),
-                  )
-                }
+                onClick={() => remove(item)}
               >
                 <Trash2 aria-hidden="true" />
               </Button>

@@ -230,6 +230,7 @@ export interface Evidence {
   authorId: string;
   createdAt: string;
   url?: string;
+  file?: File;
 }
 export type AnalysisFindingCode =
   | 'NO_VISIBLE_CHANGES'

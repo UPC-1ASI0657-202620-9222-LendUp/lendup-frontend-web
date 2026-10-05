@@ -2,7 +2,10 @@
 
 import { useMemo } from 'react';
 import { isMissingProfile } from '@/lib/profile-recovery';
-import { reconcileReservationsWithLoans } from '@/lib/business-rules';
+import {
+  economicBreakdown,
+  reconcileReservationsWithLoans,
+} from '@/lib/business-rules';
 import { categoryIds } from '@/config/reference-data';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
@@ -604,8 +607,25 @@ export function useLendUp() {
           methodId,
           crypto.randomUUID(),
         ),
-      'results.payment.guaranteePending',
-      [queryKeys.loans, ['transactions']],
+      'results.payment.guaranteeConfirmed',
+      [queryKeys.loans, queryKeys.reservations, ['transactions']],
+    );
+  };
+  const payRental = async (reservationId: string, methodId: string) => {
+    const reservation = reservations.find((item) => item.id === reservationId);
+    const loan = loans.find((item) => item.reservationId === reservationId);
+    if (!loan || !reservation) return failure();
+    return action(
+      () =>
+        backendPaymentsService.pay({
+          prestamo_id: loan.id,
+          tipo: 'PAGO_TARIFA',
+          monto: economicBreakdown(reservation.snapshot).rentalCharge,
+          medio_pago_seleccionado: methodId,
+          clave_idempotencia: crypto.randomUUID(),
+        }),
+      'results.payment.rentalConfirmed',
+      [queryKeys.loans, queryKeys.reservations, ['transactions']],
     );
   };
   const recordDelivery = async (
@@ -615,6 +635,14 @@ export function useLendUp() {
     const loan = loans.find((item) => item.reservationId === reservationId);
     if (!loan) return failure();
     try {
+      for (const item of evidence.filter((entry) => entry.file)) {
+        await evidenceService.upload(
+          loan.id,
+          'ENTREGA',
+          item.file!,
+          item.id,
+        );
+      }
       for (const item of evidence.filter(
         (entry) => entry.type === 'NOTE' && entry.description.trim(),
       )) {
@@ -650,6 +678,14 @@ export function useLendUp() {
     evidence: Evidence[],
   ) => {
     try {
+      for (const item of evidence.filter((entry) => entry.file)) {
+        await evidenceService.upload(
+          loanId,
+          'DEVOLUCION',
+          item.file!,
+          item.id,
+        );
+      }
       if (notes.trim()) {
         await evidenceService.create(loanId, {
           etapa: 'DEVOLUCION',
@@ -815,6 +851,7 @@ export function useLendUp() {
     respondRequest,
     cancelReservation,
     holdGuarantee,
+    payRental,
     recordDelivery,
     confirmReceipt,
     requestExtension: unsupported,

@@ -617,26 +617,25 @@ export const es = {
   },
   payments: {
     chooseMethod: 'Medio de pago',
-    noMethods:
-      'No hay medios de pago habilitados. La integración con el proveedor sigue pendiente en el backend.',
+    noMethods: 'No hay medios de pago habilitados en este momento.',
     methods: {
       CARD: 'Tarjeta de crédito o débito',
       WALLET: 'Billetera digital',
-      ACCOUNT_MONEY: 'Dinero en cuenta Mercado Pago',
+      ACCOUNT_MONEY: 'Saldo disponible en cuenta',
       CASH: 'Pago en efectivo',
     },
     methodHints: {
       CARD: 'Visa, Mastercard o American Express',
-      WALLET: 'Operación gestionada por el proveedor externo',
+      WALLET: 'Confirmación inmediata y comprobante registrado',
       ACCOUNT_MONEY: 'Saldo disponible en tu cuenta',
       CASH: 'Código para pagar en agentes o banca',
     },
   },
   checkout: {
-    eyebrow: 'Pago con Mercado Pago',
+    eyebrow: 'Pago de la reserva',
     title: 'Completa tu reserva · {title}',
     description:
-      'La garantía y la tarifa se procesan por separado con el proveedor externo. LendUp no guarda datos completos de tus tarjetas.',
+      'Confirma la garantía y la tarifa para habilitar la entrega del objeto.',
     back: 'Volver a la reserva',
     backToReservation: 'Volver a la reserva',
     step: 'Paso {number}',
@@ -645,14 +644,14 @@ export const es = {
     rentalLocked: 'Disponible cuando la garantía esté constituida.',
     guaranteeDone: 'Garantía constituida correctamente.',
     rentalDone: 'Pago de la tarifa aprobado.',
-    payWithProvider: 'Pagar {amount} con Mercado Pago',
-    processing: 'Procesando con el proveedor…',
+    payWithProvider: 'Confirmar pago de {amount}',
+    processing: 'Procesando pago…',
     providerPending:
-      'La operación fue registrada y permanece pendiente de confirmación del proveedor.',
+      'La operación fue registrada y está siendo confirmada.',
     allDone:
       'Listo: el pago y la garantía están confirmados. El prestamista ya puede registrar la entrega.',
     security:
-      'Serás atendido por el flujo seguro de Mercado Pago. LendUp solo registra el medio elegido y el estado de la operación.',
+      'LendUp registra el medio elegido, el importe y el estado de cada operación.',
     guaranteeNote:
       'La garantía se devuelve al finalizar el préstamo sin incidencias pendientes.',
     closedTitle: 'Esta reserva ya no admite pagos',
@@ -877,9 +876,12 @@ export const es = {
     removeButton: 'Quitar',
   },
   uploads: {
+    select: 'Seleccionar archivos',
+    hint: 'Hasta 6 fotos o videos JPG, PNG, WebP, MP4, WebM o MOV, de 5 MB cada uno.',
     errors: {
-      NOT_CONFIGURED:
-        'La carga de archivos aún no está disponible porque Cloudinary no forma parte del contrato backend vigente.',
+      LIMIT: 'Puedes adjuntar hasta 6 fotos o videos.',
+      FORMAT: 'Usa archivos JPG, PNG, WebP, MP4, WebM o MOV.',
+      SIZE: 'Cada archivo debe pesar hasta 5 MB y no estar vacío.',
     },
   },
   analysis: {
@@ -1344,6 +1346,8 @@ export const es = {
       'Actualiza tu foto, datos académicos y teléfono de contacto.',
     avatar: 'Foto de perfil',
     avatarPreview: 'Vista previa de la foto de perfil',
+    avatarEditUnavailable:
+      'La foto de perfil actual se conservará en esta edición.',
     phoneHint:
       'Solo se comparte con tu contraparte durante una reserva o préstamo vigente.',
     readonlyNote:
@@ -1472,8 +1476,8 @@ export const es = {
       reasonRequired: 'Indica el motivo de la cancelación.',
     },
     payment: {
-      guaranteePending:
-        'La solicitud de garantía fue registrada y permanece pendiente de confirmación.',
+      guaranteeConfirmed: 'Garantía constituida correctamente.',
+      rentalConfirmed: 'Pago de la tarifa confirmado correctamente.',
     },
     delivery: {
       recorded:

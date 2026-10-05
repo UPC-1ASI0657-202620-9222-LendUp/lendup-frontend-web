@@ -612,26 +612,25 @@ export const en: Messages = {
   },
   payments: {
     chooseMethod: 'Payment method',
-    noMethods:
-      'No payment methods are enabled. The provider integration is still pending in the backend.',
+    noMethods: 'No payment methods are currently available.',
     methods: {
       CARD: 'Credit or debit card',
       WALLET: 'Digital wallet',
-      ACCOUNT_MONEY: 'Mercado Pago account balance',
+      ACCOUNT_MONEY: 'Available account balance',
       CASH: 'Cash payment',
     },
     methodHints: {
       CARD: 'Visa, Mastercard or American Express',
-      WALLET: 'Operation handled by the external provider',
+      WALLET: 'Immediate confirmation with a recorded receipt',
       ACCOUNT_MONEY: 'Available balance in your account',
       CASH: 'Code to pay at agents or online banking',
     },
   },
   checkout: {
-    eyebrow: 'Payment with Mercado Pago',
+    eyebrow: 'Reservation payment',
     title: 'Complete your reservation · {title}',
     description:
-      "The deposit and the rate are processed separately with the external provider. LendUp doesn't store your full card details.",
+      'Confirm the deposit and rate payment to enable item handover.',
     back: 'Back to reservation',
     backToReservation: 'Back to reservation',
     step: 'Step {number}',
@@ -640,14 +639,14 @@ export const en: Messages = {
     rentalLocked: 'Available once the security deposit is placed.',
     guaranteeDone: 'Deposit placed successfully.',
     rentalDone: 'Rate payment approved.',
-    payWithProvider: 'Pay {amount} with Mercado Pago',
-    processing: 'Processing with the provider…',
+    payWithProvider: 'Confirm payment of {amount}',
+    processing: 'Processing payment…',
     providerPending:
-      'The operation was recorded and remains pending provider confirmation.',
+      'The operation was recorded and is being confirmed.',
     allDone:
       'Done: payment and deposit are confirmed. The lender can now record the handover.',
     security:
-      "You'll be served by Mercado Pago's secure flow. LendUp only records the chosen method and the operation status.",
+      'LendUp records the selected method, amount and status of each operation.',
     guaranteeNote:
       'The deposit is returned when the loan ends with no pending incidents.',
     closedTitle: 'This reservation no longer accepts payments',
@@ -868,9 +867,12 @@ export const en: Messages = {
     removeButton: 'Remove',
   },
   uploads: {
+    select: 'Select files',
+    hint: 'Up to 6 JPG, PNG, WebP, MP4, WebM or MOV photos and videos, 5 MB each.',
     errors: {
-      NOT_CONFIGURED:
-        'File uploads are not available yet because Cloudinary is not part of the current backend contract.',
+      LIMIT: 'You can attach up to 6 photos or videos.',
+      FORMAT: 'Use JPG, PNG, WebP, MP4, WebM or MOV files.',
+      SIZE: 'Each file must be non-empty and up to 5 MB.',
     },
   },
   analysis: {
@@ -1320,6 +1322,8 @@ export const en: Messages = {
     editDescription: 'Update your photo, academic details and contact phone.',
     avatar: 'Profile photo',
     avatarPreview: 'Profile photo preview',
+    avatarEditUnavailable:
+      'Your current profile photo will be kept during this edit.',
     phoneHint:
       'Only shared with your counterpart during an active reservation or loan.',
     readonlyNote:
@@ -1441,8 +1445,8 @@ export const en: Messages = {
       reasonRequired: 'Provide the cancellation reason.',
     },
     payment: {
-      guaranteePending:
-        'The deposit request was recorded and remains pending confirmation.',
+      guaranteeConfirmed: 'Security deposit confirmed successfully.',
+      rentalConfirmed: 'Rate payment confirmed successfully.',
     },
     delivery: {
       recorded:
