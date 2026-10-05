@@ -70,6 +70,7 @@ import {
   findUniversity,
   matchesFilters,
   sortByDistance,
+  toCatalogQuery,
   type ListingFilters,
 } from '@/services/catalog.service';
 import { quoteListing } from '@/services/payments.service';
@@ -106,8 +107,9 @@ export function ExplorePage() {
     isError,
     refetch,
   } = useQuery({
-    queryKey: ['listings', state.listings],
-    queryFn: () => catalogService.searchListings(state.listings, filters),
+    queryKey: ['listings', 'explore', toCatalogQuery(filters)],
+    queryFn: ({ signal }) => catalogService.searchListings(filters, signal),
+    staleTime: 15_000,
   });
   const university = universities.find(
     (item) => item.id === filters.universityId,
@@ -115,7 +117,7 @@ export function ExplorePage() {
   const campuses = Array.from(
     new Set([
       ...(university?.campuses.map((campus) => campus.name) ?? []),
-      ...data
+      ...state.listings
         .filter(
           (item) =>
             !filters.universityId || item.universityId === filters.universityId,
@@ -128,6 +130,7 @@ export function ExplorePage() {
     filters.to &&
     new Date(filters.to) <= new Date(filters.from),
   );
+  const incompletePeriod = Boolean(filters.from) !== Boolean(filters.to);
   const results = useMemo(() => {
     const filtered = data.filter((listing) =>
       matchesFilters(listing, filters, (code) => t(`categories.${code}`)),
@@ -259,7 +262,13 @@ export function ExplorePage() {
         </Field>
         <Field
           label={t('fields.to')}
-          error={invalidPeriod ? t('validation.endAfterStart') : undefined}
+          error={
+            incompletePeriod
+              ? t('validation.periodBothRequired')
+              : invalidPeriod
+                ? t('validation.endAfterStart')
+                : undefined
+          }
         >
           <input
             type="datetime-local"

@@ -1,6 +1,7 @@
 import { categories, conditions, universities } from '@/config/reference-data';
 import { distanceKm, isPeriodAvailable } from '@/lib/business-rules';
 import { backendCatalogService } from '@/services/catalog-api.service';
+import { toCatalogQuery } from '@/lib/catalog-filters';
 import { mapListing } from '@/services/api/mappers/domain';
 import type {
   CategoryCode,
@@ -96,28 +97,17 @@ export function sortByDistance(listings: Listing[], origin: Coordinates) {
     );
 }
 
+export { toCatalogQuery };
+
 export const catalogService = {
   universities,
   categories,
   conditions,
-  async searchListings(_source: Listing[], filters: ListingFilters) {
-    const rows = await backendCatalogService.search({
-      nombre: filters.query,
-      categoria: filters.category
-        ? '00000000-0000-4000-8000-000000000003'
-        : undefined,
-      campus: filters.campus,
-      desde: filters.from || undefined,
-      hasta: filters.to || undefined,
-    });
-    return rows
-      .map(mapListing)
-      .filter(
-        (listing) =>
-          (!filters.universityId ||
-            listing.universityId === filters.universityId) &&
-          (!filters.location ||
-            normalize(listing.location).includes(normalize(filters.location))),
-      );
+  async searchListings(filters: ListingFilters, signal?: AbortSignal) {
+    const rows = await backendCatalogService.search(
+      toCatalogQuery(filters),
+      signal,
+    );
+    return rows.map(mapListing);
   },
 };

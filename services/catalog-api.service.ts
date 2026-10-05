@@ -18,7 +18,9 @@ export interface TermsDocumentDto {
 export type CatalogFilters = {
   nombre?: string;
   categoria?: string;
+  universidad?: string;
   campus?: string;
+  ubicacion?: string;
   desde?: string;
   hasta?: string;
 };

@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import { isMissingProfile } from '@/lib/profile-recovery';
+import { categoryIds } from '@/config/reference-data';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
 import { FirebaseError } from 'firebase/app';
@@ -98,13 +99,13 @@ const queryKeys = {
   terms: ['terms'] as const,
 };
 
-const categoryId = '00000000-0000-4000-8000-000000000003';
-
 function publicationBody(
   listing: Partial<NewListing>,
 ): Partial<CreatePublicationRequestDto> {
   return {
-    ...(listing.category ? { categoria_id: categoryId } : {}),
+    ...(listing.category
+      ? { categoria_id: categoryIds[listing.category] }
+      : {}),
     ...(listing.title ? { titulo: listing.title } : {}),
     ...(listing.description ? { descripcion: listing.description } : {}),
     ...(listing.condition ? { condicion_objeto: listing.condition } : {}),

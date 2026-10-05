@@ -219,6 +219,7 @@ export const es = {
     dailyRate: 'La tarifa diaria debe ser mayor que cero.',
     nonNegative: 'El monto no puede ser negativo.',
     endAfterStart: 'La fecha final debe ser posterior a la inicial.',
+    periodBothRequired: 'Selecciona las fechas de inicio y fin.',
     photoRequired: 'Agrega al menos una fotografía del objeto.',
     reviewFields: 'Revisa los campos marcados antes de continuar.',
   },

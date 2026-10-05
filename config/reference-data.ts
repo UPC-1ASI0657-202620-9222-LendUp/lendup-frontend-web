@@ -1,8 +1,7 @@
 import type { CategoryCode, ConditionCode, University } from '@/types/domain';
 
-// BACKEND GAP: the API has no endpoints for universities, campuses or categories.
-// This public reference configuration is used only to populate forms. The sole
-// category present in backend data.sql is OTROS.
+// Campus metadata is enriched locally because the university endpoint does not
+// expose coordinates. Category ids mirror the stable seeded backend catalog.
 export const universities: University[] = [
   {
     id: 'UPC',
@@ -94,7 +93,30 @@ export const universities: University[] = [
   },
 ];
 
-export const categories: CategoryCode[] = ['OTHER'];
+export const categoryIds: Record<CategoryCode, string> = {
+  OTHER: '00000000-0000-4000-8000-000000000003',
+  CALCULATORS: '00000000-0000-4000-8000-000000000004',
+  CAMERAS: '00000000-0000-4000-8000-000000000005',
+  BOOKS: '00000000-0000-4000-8000-000000000006',
+  TOOLS: '00000000-0000-4000-8000-000000000007',
+  ELECTRONICS: '00000000-0000-4000-8000-000000000008',
+};
+
+export const categories: CategoryCode[] = [
+  'CALCULATORS',
+  'CAMERAS',
+  'BOOKS',
+  'TOOLS',
+  'ELECTRONICS',
+  'OTHER',
+];
+
+export function categoryCodeForId(id: string): CategoryCode {
+  const entry = Object.entries(categoryIds).find(
+    ([, categoryId]) => categoryId === id,
+  );
+  return entry ? (entry[0] as CategoryCode) : 'OTHER';
+}
 export const conditions: ConditionCode[] = [
   'NEW',
   'EXCELLENT',

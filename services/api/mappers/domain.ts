@@ -1,5 +1,6 @@
 import type { BackendRow, CurrentStudentDto } from '@/services/api/dto/backend';
 import { fromApiLocalDateTime } from '../../../lib/dates.ts';
+import { categoryCodeForId } from '../../../config/reference-data.ts';
 import type {
   AppNotification,
   Incident,
@@ -88,9 +89,6 @@ export function mapPublicStudent(row: BackendRow): User {
   };
 }
 
-const category = (value: string): Listing['category'] =>
-  value === '00000000-0000-4000-8000-000000000003' ? 'OTHER' : 'OTHER';
-
 const condition = (value: string): Listing['condition'] => {
   const normalized = value.toUpperCase().replaceAll(' ', '_');
   return ['NEW', 'EXCELLENT', 'VERY_GOOD', 'GOOD', 'FAIR'].includes(normalized)
@@ -137,7 +135,7 @@ export function mapListing(row: BackendRow): Listing {
     id: text(row, 'id'),
     ownerId: text(row, 'propietario_usuario_id'),
     title: text(row, 'titulo'),
-    category: category(text(row, 'categoria_id')),
+    category: categoryCodeForId(text(row, 'categoria_id')),
     description: text(row, 'descripcion'),
     condition: condition(text(row, 'condicion_objeto')),
     universityId: text(row, 'universidad'),

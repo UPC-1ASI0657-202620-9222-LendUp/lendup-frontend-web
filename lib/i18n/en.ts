@@ -216,6 +216,7 @@ export const en: Messages = {
     dailyRate: 'The daily rate must be greater than zero.',
     nonNegative: 'The amount cannot be negative.',
     endAfterStart: 'The end date must be after the start date.',
+    periodBothRequired: 'Select both the start and end dates.',
     photoRequired: 'Add at least one photo of the item.',
     reviewFields: 'Review the highlighted fields before continuing.',
   },
