@@ -562,6 +562,18 @@ function ReservationActions({ reservation }: { reservation: Reservation }) {
     (item) => item.reservationId === reservation.id,
   );
   const settled = isPaymentSettled(reservation);
+  if (
+    loan &&
+    isBorrower &&
+    loan.status === 'AWAITING_DELIVERY' &&
+    !settled
+  )
+    return (
+      <Button render={<Link to={`/reservations/${reservation.id}/checkout`} />}>
+        <WalletCards aria-hidden="true" />
+        {t('reservations.pay')}
+      </Button>
+    );
   if (loan && !isBorrower && loan.status === 'AWAITING_DELIVERY' && settled)
     return (
       <Button render={<Link to={`/delivery?reservation=${reservation.id}`} />}>
@@ -1305,6 +1317,9 @@ export function LoanDetailPage() {
   const reservation = state.reservations.find(
     (item) => item.id === loan.reservationId,
   );
+  const paymentSettled = reservation
+    ? isPaymentSettled(reservation)
+    : false;
   const incidents = incidentsOfLoan(state, loan.id);
   const openIncident = loanHasOpenIncident(state, loan);
   const pendingExtension = loan.extensions.find(
@@ -1337,12 +1352,45 @@ export function LoanDetailPage() {
         {t('loanDetail.actions.confirmReceipt')}
       </Button>,
     );
-  if (!isBorrower && loan.status === 'AWAITING_DELIVERY' && reservation)
+  if (
+    isBorrower &&
+    loan.status === 'AWAITING_DELIVERY' &&
+    reservation &&
+    !paymentSettled
+  )
+    add(
+      'checkout',
+      <Button
+        render={<Link to={`/reservations/${reservation.id}/checkout`} />}
+      >
+        <WalletCards aria-hidden="true" />
+        {t('reservations.pay')}
+      </Button>,
+    );
+  if (
+    !isBorrower &&
+    loan.status === 'AWAITING_DELIVERY' &&
+    reservation &&
+    paymentSettled
+  )
     add(
       'delivery',
       <Button render={<Link to={`/delivery?reservation=${reservation.id}`} />}>
         {t('loanDetail.actions.recordDelivery')}
       </Button>,
+    );
+  if (
+    !isBorrower &&
+    loan.status === 'AWAITING_DELIVERY' &&
+    reservation &&
+    !paymentSettled
+  )
+    add(
+      'waiting-payment',
+      <p className="inline-status warning">
+        <CalendarClock aria-hidden="true" />
+        {t('reservations.waitingPayment')}
+      </p>,
     );
   if (isBorrower && ['ACTIVE', 'OVERDUE'].includes(loan.status)) {
     add(
