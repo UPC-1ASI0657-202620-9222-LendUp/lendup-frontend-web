@@ -375,12 +375,6 @@ function RequestCard({
               <DefinitionList
                 items={[
                   [
-                    t('profile.verification'),
-                    person.verified
-                      ? t('profile.verified')
-                      : t('profile.notVerified'),
-                  ],
-                  [
                     t('profile.reputation'),
                     <Reputation
                       key="rep"

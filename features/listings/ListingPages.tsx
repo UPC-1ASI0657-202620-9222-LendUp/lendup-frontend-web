@@ -513,12 +513,6 @@ export function ObjectDetailPage() {
           />
           <div className="owner-stats">
             <Reputation value={reputation.average} count={reputation.count} />
-            <span>
-              <ShieldCheck aria-hidden="true" />
-              {owner?.verified
-                ? t('profile.verified')
-                : t('profile.notVerified')}
-            </span>
           </div>
           <Button
             variant="outline"
@@ -1178,16 +1172,8 @@ export function AvailabilityPage() {
   const { id } = useParams();
   const { state, createAvailability, updateAvailability, deleteAvailability } =
     useLendUp();
-  const [defaults] = useState(() => {
-    const start = new Date(Date.now() + 86_400_000);
-    start.setMinutes(0, 0, 0);
-    return {
-      start: toZonedInput(start),
-      end: toZonedInput(new Date(start.getTime() + 86_400_000)),
-    };
-  });
-  const [startAt, setStartAt] = useState(defaults.start);
-  const [endAt, setEndAt] = useState(defaults.end);
+  const [startAt, setStartAt] = useState('');
+  const [endAt, setEndAt] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1215,15 +1201,15 @@ export function AvailabilityPage() {
     startIso && endIso && new Date(endIso) > new Date(startIso),
   );
   const future = Boolean(startIso && new Date(startIso) > new Date());
-  const overlaps = Boolean(
-    validRange &&
-    available.some(
-      (slot) =>
-        slot.id !== editingId &&
-        new Date(startIso) < new Date(slot.endAt) &&
-        new Date(endIso) > new Date(slot.startAt),
-    ),
-  );
+  const conflictingSlot = validRange
+    ? available.find(
+        (slot) =>
+          slot.id !== editingId &&
+          new Date(startIso) < new Date(slot.endAt) &&
+          new Date(endIso) > new Date(slot.startAt),
+      )
+    : undefined;
+  const overlaps = Boolean(conflictingSlot);
   const canSubmit = Boolean(
     startAt && endAt && validRange && future && !overlaps,
   );
@@ -1235,13 +1221,19 @@ export function AvailabilityPage() {
         : !future
           ? t('availability.pastStart')
           : overlaps
-            ? t('availability.overlap')
+            ? t('availability.overlap') +
+              ' ' +
+              (conflictingSlot
+                ? formatDateTime(conflictingSlot.startAt) +
+                  ' – ' +
+                  formatDateTime(conflictingSlot.endAt)
+                : '')
             : null;
 
   const resetForm = () => {
     setEditingId(null);
-    setStartAt(defaults.start);
-    setEndAt(defaults.end);
+    setStartAt('');
+    setEndAt('');
   };
   const beginEdit = (slot: (typeof available)[number]) => {
     setEditingId(slot.id);

@@ -487,6 +487,10 @@ export function CalendarPage() {
   const events = useMemo<CalendarEvent[]>(() => {
     const title = (listingId: string) =>
       listingById(state, listingId)?.title ?? '';
+    // A loan owns the return date, including extensions and completed returns.
+    const loanReservationIds = new Set(
+      state.loans.map((loan) => loan.reservationId),
+    );
     const fromReservations = state.reservations
       .filter(
         (item) =>
@@ -502,14 +506,14 @@ export function CalendarPage() {
           item: title(item.listingId),
           href: `/reservations/${item.id}`,
         },
-        {
+        ...(loanReservationIds.has(item.id) ? [] : [{
           id: `${item.id}-return`,
           date: new Date(item.snapshot.endAt),
           kind: 'return' as const,
           label: 'calendar.events.return' as MessageKey,
           item: title(item.listingId),
           href: `/reservations/${item.id}`,
-        },
+        }]),
       ]);
     const fromLoans = state.loans
       .filter(
