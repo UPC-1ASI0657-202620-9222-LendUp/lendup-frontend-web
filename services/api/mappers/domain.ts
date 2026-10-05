@@ -2,6 +2,7 @@ import type { BackendRow, CurrentStudentDto } from '@/services/api/dto/backend';
 import { fromApiLocalDateTime } from '../../../lib/dates.ts';
 import { categoryCodeForId } from '../../../config/reference-data.ts';
 import type {
+  Evidence,
   AppNotification,
   Incident,
   Listing,
@@ -10,6 +11,7 @@ import type {
   PaymentTransaction,
   Rating,
   Reservation,
+  TimelineEventCode,
   TermsSnapshot,
   User,
 } from '@/types/domain';
@@ -245,6 +247,33 @@ export function mapReservation(
   };
 }
 
+const childRows = (row: BackendRow, key: string): BackendRow[] =>
+  Array.isArray(row[key]) ? (row[key] as BackendRow[]) : [];
+export function mapEvidence(row: BackendRow): Evidence {
+  const note = text(row, 'observacion');
+  return {
+    id: text(row, 'id'),
+    phase:
+      text(row, 'etapa') === 'ENTREGA'
+        ? 'INITIAL'
+        : text(row, 'etapa') === 'DEVOLUCION'
+          ? 'FINAL'
+          : 'INCIDENT',
+    type:
+      text(row, 'tipo') === 'FOTO'
+        ? 'PHOTO'
+        : text(row, 'tipo') === 'VIDEO'
+          ? 'VIDEO'
+          : 'NOTE',
+    label: note || text(row, 'tipo'),
+    description: note,
+    url: text(row, 'url') || undefined,
+    author: text(row, 'registrada_por_usuario_id'),
+    authorId: text(row, 'registrada_por_usuario_id'),
+    createdAt: iso(row, 'registrada_en'),
+  };
+}
+
 export function mapLoan(row: BackendRow, reservation?: Reservation): Loan {
   const statusMap: Record<string, Loan['status']> = {
     RESERVADO: 'AWAITING_DELIVERY',
@@ -296,8 +325,20 @@ export function mapLoan(row: BackendRow, reservation?: Reservation): Loan {
     completedAt: text(row, 'finalizado_en') || undefined,
     extensions: [],
     reschedules: [],
-    evidence: [],
-    timeline: [],
+    evidence: childRows(row, 'evidencias').map(mapEvidence),
+    timeline: (
+      [
+        ['entrega_registrada_en', 'DELIVERY_RECORDED'],
+        ['recepcion_confirmada_en', 'RECEIPT_CONFIRMED'],
+        ['devolucion_registrada_en', 'RETURN_RECORDED'],
+        ['vencido_en', 'LOAN_OVERDUE'],
+        ['finalizado_en', 'LOAN_COMPLETED'],
+      ] as [string, TimelineEventCode][]
+    ).flatMap(([key, event]) =>
+      text(row, key)
+        ? [{ id: key, event, at: text(row, key), complete: true }]
+        : [],
+    ),
     ratedBy: [],
   };
 }
@@ -325,7 +366,7 @@ export function mapIncident(row: BackendRow): Incident {
     type: typeMap[text(row, 'tipo')] ?? 'OTHER',
     reportedBy: text(row, 'reportada_por_usuario_id'),
     description: text(row, 'descripcion'),
-    evidence: [],
+    evidence: childRows(row, 'evidencias').map(mapEvidence),
     status: resolved
       ? 'RESOLVED'
       : text(row, 'revision_iniciada_en')
@@ -334,10 +375,15 @@ export function mapIncident(row: BackendRow): Incident {
     createdAt: iso(row, 'reportada_en'),
     reviewStartedAt: text(row, 'revision_iniciada_en') || undefined,
     reviewedBy: text(row, 'resuelta_por_usuario_id') || undefined,
-    adminNotes: [],
-    guaranteeAmount:
-      number(row, 'saldo_garantia_previsto') +
-      number(row, 'monto_garantia_afectado'),
+    counterpartyStatement: text(row, 'descargo') || undefined,
+    counterpartyStatementAt: text(row, 'descargo_en') || undefined,
+    adminNotes: childRows(row, 'observaciones').map((note) => ({
+      id: text(note, 'id'),
+      adminId: text(note, 'administrador_usuario_id'),
+      text: text(note, 'contenido'),
+      createdAt: iso(note, 'registrada_en'),
+    })),
+    guaranteeAmount: number(row, 'garantia_monetaria_acordada'),
     resolution: resolved
       ? {
           decision: decisionMap[text(row, 'decision_garantia')] ?? 'NO_IMPACT',
@@ -359,7 +405,9 @@ export function mapNotification(row: BackendRow): AppNotification {
       ? `/reservations/${originId}`
       : origin === 'PRESTAMO'
         ? `/loans/${originId}`
-        : '/notifications';
+        : origin === 'INCIDENCIA'
+          ? `/incidents/${originId}`
+          : '/notifications';
   return {
     id: text(row, 'id'),
     userId: text(row, 'destinatario_usuario_id'),

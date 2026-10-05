@@ -192,28 +192,53 @@ export function useLendUp() {
     staleTime: 60_000,
   });
   const adminIncidentsQuery = useQuery({
-    queryKey: queryKeys.incidents,
-    queryFn: ({ signal }) => evidenceService.adminIncidents({}, signal),
-    enabled: currentUser?.role === 'ADMIN',
+    queryKey: [...queryKeys.incidents, currentUser?.id, currentUser?.role],
+    queryFn: ({ signal }) =>
+      currentUser?.role === 'ADMIN'
+        ? evidenceService.adminIncidents({}, signal)
+        : evidenceService.list(signal),
+    enabled,
   });
   const incidentRouteId = location.pathname.match(
-    /^\/incidents\/([^/]+)$/,
+    /^\/(?:admin\/)?incidents\/([^/]+)$/,
   )?.[1];
   const incidentDetailQuery = useQuery({
-    queryKey: ['incident', incidentRouteId],
+    queryKey: ['incident', incidentRouteId, currentUser?.id],
     queryFn: ({ signal }) => evidenceService.incident(incidentRouteId!, signal),
     enabled: enabled && Boolean(incidentRouteId),
   });
 
+  const incidentRows = [
+    ...(incidentDetailQuery.data ? [incidentDetailQuery.data] : []),
+    ...(adminIncidentsQuery.data ?? []),
+  ].filter(
+    (row, index, rows) =>
+      rows.findIndex((candidate) => candidate.id === row.id) === index,
+  );
+  const uniqueRows = (rows: BackendRow[]) =>
+    rows.filter(
+      (row, index) =>
+        rows.findIndex((candidate) => candidate.id === row.id) === index,
+    );
   const listings = (listingsQuery.data ?? []).map(mapListing);
   const requests = (requestsQuery.data ?? []).map(mapRequest);
-  const mappedReservations = (reservationsQuery.data ?? []).map((row) =>
+  const mappedReservations = uniqueRows([
+    ...(reservationsQuery.data ?? []),
+    ...incidentRows.flatMap((row) =>
+      row.reserva ? [row.reserva as BackendRow] : [],
+    ),
+  ]).map((row) =>
     mapReservation(
       row,
       requests.find((request) => request.id === String(row.solicitud_id ?? '')),
     ),
   );
-  const loans = (loansQuery.data ?? []).map((row) =>
+  const loans = uniqueRows([
+    ...incidentRows.flatMap((row) =>
+      row.prestamo ? [row.prestamo as BackendRow] : [],
+    ),
+    ...(loansQuery.data ?? []),
+  ]).map((row) =>
     mapLoan(
       row,
       mappedReservations.find(
@@ -225,15 +250,7 @@ export function useLendUp() {
     mappedReservations,
     loans,
   );
-  const incidents = [
-    ...(adminIncidentsQuery.data ?? []),
-    ...(incidentDetailQuery.data ? [incidentDetailQuery.data] : []),
-  ]
-    .filter(
-      (row, index, rows) =>
-        rows.findIndex((candidate) => candidate.id === row.id) === index,
-    )
-    .map(mapIncident);
+  const incidents = incidentRows.map(mapIncident);
 
   const publicProfileRouteId =
     location.pathname.match(/^\/users\/([^/]+)$/)?.[1];
@@ -631,14 +648,38 @@ export function useLendUp() {
     loanId: string,
     type: Incident['type'],
     description: string,
-    _evidence?: Evidence[],
+    evidence: Evidence[] = [],
+    photos: File[] = [],
+    requestId?: string,
   ) =>
     action(
       () =>
-        evidenceService.reportIncident(loanId, incidentType(type), description),
+        evidenceService.reportIncident(
+          loanId,
+          incidentType(type),
+          description,
+          evidence
+            .filter((item) => item.type === 'NOTE')
+            .map((item) => item.description),
+          photos,
+          requestId,
+        ),
       'results.incident.reported',
       [queryKeys.incidents, queryKeys.loans],
     );
+  const incidentAction = (id: string, operation: () => Promise<BackendRow>) =>
+    action(operation, 'results.incident.updated', [
+      queryKeys.incidents,
+      ['incident', id],
+      queryKeys.loans,
+      queryKeys.notifications,
+    ]);
+  const submitIncidentStatement = (id: string, content: string) =>
+    incidentAction(id, () => evidenceService.statement(id, content));
+  const startIncidentReview = (id: string) =>
+    incidentAction(id, () => evidenceService.review(id));
+  const addIncidentNote = (id: string, content: string) =>
+    incidentAction(id, () => evidenceService.note(id, content));
   const resolveIncident = (
     id: string,
     decision: IncidentDecision,
@@ -671,7 +712,12 @@ export function useLendUp() {
           moneda: 'PEN',
         }),
       'results.incident.resolved',
-      [queryKeys.incidents, queryKeys.loans],
+      [
+        queryKeys.incidents,
+        ['incident', id],
+        queryKeys.loans,
+        queryKeys.notifications,
+      ],
     );
   };
   const rateLoan = (loanId: string, stars: number, comment: string) =>
@@ -703,6 +749,7 @@ export function useLendUp() {
         requestsQuery,
         reservationsQuery,
         loansQuery,
+        adminIncidentsQuery,
         incidentDetailQuery,
         ...transactionQueries,
       ].some((query) => query.isLoading),
@@ -742,6 +789,19 @@ export function useLendUp() {
     respondReschedule: unsupported,
     recordReturn,
     confirmReturn,
+    incidentDetailError:
+      incidentDetailQuery.isError &&
+      !(
+        incidentDetailQuery.error instanceof DomainError &&
+        ['NOT_FOUND', 'FORBIDDEN'].includes(incidentDetailQuery.error.code)
+      ),
+    retryIncidentDetail: () => incidentDetailQuery.refetch(),
+    incidentsLoading: adminIncidentsQuery.isLoading,
+    incidentsError: adminIncidentsQuery.isError,
+    retryIncidents: () => adminIncidentsQuery.refetch(),
+    submitIncidentStatement,
+    startIncidentReview,
+    addIncidentNote,
     reportIncident,
     resolveIncident,
     rateLoan,

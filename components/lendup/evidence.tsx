@@ -48,11 +48,13 @@ export function EvidenceUploader({
 
   return (
     <div className="evidence-uploader">
-      <div className="upload-zone" aria-disabled="true">
-        <Info aria-hidden="true" />
-        <strong>{label}</strong>
-        <span>{t('uploads.errors.NOT_CONFIGURED')}</span>
-      </div>
+      {phase !== 'INCIDENT' && (
+        <div className="upload-zone" aria-disabled="true">
+          <Info aria-hidden="true" />
+          <strong>{label}</strong>
+          <span>{t('uploads.errors.NOT_CONFIGURED')}</span>
+        </div>
+      )}
       <div className="evidence-note-input">
         <label className="field">
           <span className="field-label">{t('evidence.noteLabel')}</span>

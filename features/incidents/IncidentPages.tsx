@@ -23,6 +23,8 @@ import {
   DefinitionList,
   EmptyState,
   Feedback,
+  LoadingSkeleton,
+  ErrorState,
   FinancialCard,
   NotFound,
   PageHeader,
@@ -31,12 +33,10 @@ import {
   UserChip,
 } from '@/components/lendup/shared';
 import {
-  AnalysisPanel,
   EvidenceGallery,
   EvidenceUploader,
 } from '@/components/lendup/evidence';
 import { ConfirmDialog, Field } from '@/components/lendup/forms';
-import { useEvidenceAnalysis } from '@/hooks/use-evidence-analysis';
 import { useI18n, type MessageKey } from '@/lib/i18n';
 import { remainingGuarantee } from '@/lib/business-rules';
 import { zonedDayKey } from '@/lib/dates';
@@ -108,7 +108,13 @@ function ResolutionSummary({ incident }: { incident: Incident }) {
 
 export function IncidentsPage() {
   const { t, formatDateTime } = useI18n();
-  const { state, reportIncident } = useLendUp();
+  const {
+    state,
+    reportIncident,
+    incidentsLoading,
+    incidentsError,
+    retryIncidents,
+  } = useLendUp();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const user = currentUserOf(state);
@@ -128,6 +134,9 @@ export function IncidentsPage() {
   const [type, setType] = useState<IncidentType | ''>('');
   const [description, setDescription] = useState('');
   const [evidence, setEvidence] = useState<Evidence[]>([]);
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [requestId] = useState(() => crypto.randomUUID());
   const [result, setResult] = useState<ActionResult | null>(null);
   const [touched, setTouched] = useState(false);
   const mine = state.incidents
@@ -152,7 +161,17 @@ export function IncidentsPage() {
   const submit = async () => {
     setTouched(true);
     if (errors.loan || errors.type || errors.description || !type) return;
-    const outcome = await reportIncident(loanId, type, description, evidence);
+    if (submitting) return;
+    setSubmitting(true);
+    const outcome = await reportIncident(
+      loanId,
+      type,
+      description,
+      evidence,
+      photos,
+      requestId,
+    );
+    setSubmitting(false);
     setResult(outcome);
     if (outcome.ok && outcome.id) navigate(`/incidents/${outcome.id}`);
   };
@@ -243,6 +262,40 @@ export function IncidentsPage() {
                   />
                 </div>
               </div>
+              <Field
+                label={t('incidents.photos')}
+                hint={t('incidents.photosHint')}
+              >
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  disabled={submitting}
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files ?? []);
+                    if (
+                      files.length > 6 ||
+                      files.some(
+                        (file) =>
+                          file.size === 0 ||
+                          file.size > 5 * 1024 * 1024 ||
+                          !['image/jpeg', 'image/png', 'image/webp'].includes(
+                            file.type,
+                          ),
+                      )
+                    ) {
+                      setResult({ ok: false, message: 'incidents.photoError' });
+                      event.target.value = '';
+                      setPhotos([]);
+                      return;
+                    }
+                    setPhotos(files);
+                  }}
+                />
+                {photos.map((file) => (
+                  <small key={file.name}>{file.name}</small>
+                ))}
+              </Field>
               <p className="inline-status">
                 <ShieldCheck aria-hidden="true" />
                 {t('incidents.guaranteeHoldNotice')}
@@ -256,7 +309,7 @@ export function IncidentsPage() {
                 >
                   {t('common.cancel')}
                 </Button>
-                <Button type="button" onClick={submit}>
+                <Button type="button" onClick={submit} disabled={submitting}>
                   {t('incidents.submit')}
                 </Button>
               </div>
@@ -264,7 +317,16 @@ export function IncidentsPage() {
           )}
         </section>
       )}
-      {mine.length ? (
+      {incidentsError ? (
+        <section className="panel">
+          <p role="alert">{t('incidents.loadError')}</p>
+          <Button onClick={() => void retryIncidents()}>
+            {t('incidents.retry')}
+          </Button>
+        </section>
+      ) : incidentsLoading ? (
+        <output>{t('incidents.loading')}</output>
+      ) : mine.length ? (
         <ul className="incident-list">
           {mine.map((incident) => {
             const loan = state.loans.find(
@@ -306,8 +368,8 @@ export function IncidentsPage() {
         !showForm && (
           <EmptyState
             icon={ShieldAlert}
-            title={t('common.backendGap')}
-            description={t('incidents.listGap')}
+            title={t('incidents.emptyTitle')}
+            description={t('incidents.emptyDescription')}
           />
         )
       )}
@@ -318,7 +380,9 @@ export function IncidentsPage() {
 export function IncidentDetailPage() {
   const { t, formatDateTime } = useI18n();
   const { id } = useParams();
-  const { state } = useLendUp();
+  const { state, submitIncidentStatement } = useLendUp();
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const [saving, setSaving] = useState(false);
   const [statement, setStatement] = useState('');
   const incident = state.incidents.find((item) => item.id === id);
   const loan = state.loans.find((item) => item.id === incident?.loanId);
@@ -343,8 +407,8 @@ export function IncidentDetailPage() {
         />
         <EmptyState
           icon={ShieldAlert}
-          title={t('common.backendGap')}
-          description={t('admin.loanDataGap')}
+          title={t('incidents.notFound')}
+          description={t('errors.notFound.description')}
         />
       </>
     );
@@ -414,6 +478,7 @@ export function IncidentDetailPage() {
         />
       </div>
       <ResolutionSummary incident={incident} />
+      <Feedback result={result} />
       {canRespond && (
         <section className="panel">
           <p className="eyebrow">{t('incidents.yourStatement')}</p>
@@ -429,8 +494,19 @@ export function IncidentDetailPage() {
               onChange={(event) => setStatement(event.target.value)}
             />
           </Field>
-          <p className="muted small">{t('common.backendGap')}</p>
-          <Button type="button" disabled title={t('common.backendGap')}>
+          <Button
+            type="button"
+            disabled={saving || statement.trim().length < 20}
+            onClick={async () => {
+              setSaving(true);
+              const outcome = await submitIncidentStatement(
+                incident.id,
+                statement,
+              );
+              setResult(outcome);
+              setSaving(false);
+            }}
+          >
             {t('incidents.saveStatement')}
           </Button>
         </section>
@@ -443,7 +519,8 @@ const incidentStatuses: IncidentStatus[] = ['OPEN', 'UNDER_REVIEW', 'RESOLVED'];
 
 export function AdminIncidentsPage() {
   const { t, formatDateTime, formatMoney } = useI18n();
-  const { state } = useLendUp();
+  const { state, incidentsLoading, incidentsError, retryIncidents } =
+    useLendUp();
   const [status, setStatus] = useState<IncidentStatus | ''>('');
   const [type, setType] = useState<IncidentType | ''>('');
   const [date, setDate] = useState('');
@@ -567,7 +644,16 @@ export function AdminIncidentsPage() {
       <output className="result-count">
         {t('admin.results', { count: incidents.length })}
       </output>
-      {incidents.length ? (
+      {incidentsError ? (
+        <section className="panel">
+          <p role="alert">{t('incidents.loadError')}</p>
+          <Button onClick={() => void retryIncidents()}>
+            {t('incidents.retry')}
+          </Button>
+        </section>
+      ) : incidentsLoading ? (
+        <output>{t('incidents.loading')}</output>
+      ) : incidents.length ? (
         <section className="panel table-panel">
           <div className="responsive-table">
             <table>
@@ -651,10 +737,18 @@ export function AdminIncidentDetailPage() {
   const { t, formatDateTime, formatMoney } = useI18n();
   const { id } = useParams();
   const navigate = useNavigate();
-  const { state, resolveIncident } = useLendUp();
+  const {
+    state,
+    dataLoading,
+    incidentDetailError,
+    retryIncidentDetail,
+    resolveIncident,
+    startIncidentReview,
+    addIncidentNote,
+  } = useLendUp();
+  const [saving, setSaving] = useState(false);
   const incident = state.incidents.find((item) => item.id === id);
   const loan = state.loans.find((item) => item.id === incident?.loanId);
-  const { analysis, run } = useEvidenceAnalysis(loan);
   const [note, setNote] = useState('');
   const [result, setResult] = useState<ActionResult | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -676,7 +770,7 @@ export function AdminIncidentDetailPage() {
         .superRefine((value, context) => {
           if (
             value.decision === 'PARTIAL' &&
-            (value.amount <= 0 || value.amount > available)
+            (value.amount <= 0 || value.amount >= available)
           )
             context.addIssue({
               code: 'custom',
@@ -701,6 +795,9 @@ export function AdminIncidentDetailPage() {
   });
   const decision = watch('decision') as IncidentDecision;
   const amountValue = watch('amount');
+  if (dataLoading) return <LoadingSkeleton />;
+  if (incidentDetailError)
+    return <ErrorState onRetry={() => void retryIncidentDetail()} />;
   if (!incident || !loan)
     return (
       <NotFound
@@ -719,6 +816,8 @@ export function AdminIncidentDetailPage() {
         : 0;
 
   const resolve = async () => {
+    if (saving) return;
+    setSaving(true);
     const values = getValues();
     const outcome = await resolveIncident(
       incident.id,
@@ -727,6 +826,7 @@ export function AdminIncidentDetailPage() {
       values.justification,
     );
     setResult(outcome);
+    setSaving(false);
     setConfirmOpen(false);
     if (outcome.ok) navigate('/admin/incidents');
   };
@@ -745,7 +845,15 @@ export function AdminIncidentDetailPage() {
           <div className="header-actions">
             <StatusBadge kind="incident" status={incident.status} />
             {incident.status === 'OPEN' && (
-              <Button type="button" disabled title={t('common.backendGap')}>
+              <Button
+                type="button"
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  setResult(await startIncidentReview(incident.id));
+                  setSaving(false);
+                }}
+              >
                 {t('admin.startReview')}
               </Button>
             )}
@@ -835,11 +943,6 @@ export function AdminIncidentDetailPage() {
             items={incident.evidence}
           />
         </div>
-        <AnalysisPanel
-          analysis={analysis}
-          evidence={loan.evidence}
-          onAnalyze={run}
-        />
       </section>
       <div className="two-panel-grid">
         <section className="panel">
@@ -875,8 +978,14 @@ export function AdminIncidentDetailPage() {
               <Button
                 type="button"
                 variant="outline"
-                disabled
-                title={t('common.backendGap')}
+                disabled={saving || !note.trim()}
+                onClick={async () => {
+                  setSaving(true);
+                  const outcome = await addIncidentNote(incident.id, note);
+                  setResult(outcome);
+                  if (outcome.ok) setNote('');
+                  setSaving(false);
+                }}
               >
                 {t('admin.addNote')}
               </Button>
@@ -886,7 +995,7 @@ export function AdminIncidentDetailPage() {
           ) : null}
         </section>
       </div>
-      {incident.status !== 'RESOLVED' && (
+      {incident.status === 'UNDER_REVIEW' && (
         <form
           className="panel resolution-form"
           onSubmit={handleSubmit(() => setConfirmOpen(true))}
@@ -906,7 +1015,12 @@ export function AdminIncidentDetailPage() {
                 key={value}
                 className={decision === value ? 'selected' : ''}
               >
-                <input type="radio" value={value} {...register('decision')} />
+                <input
+                  type="radio"
+                  value={value}
+                  disabled={value !== 'NO_IMPACT' && available <= 0}
+                  {...register('decision')}
+                />
                 <ShieldCheck aria-hidden="true" />
                 <span>
                   <strong>{t(`incidentDecisions.${value}.title`)}</strong>
@@ -924,7 +1038,7 @@ export function AdminIncidentDetailPage() {
               <input
                 type="number"
                 inputMode="decimal"
-                step="0.5"
+                step="0.01"
                 min="0"
                 max={available}
                 {...register('amount', { valueAsNumber: true })}
@@ -949,7 +1063,6 @@ export function AdminIncidentDetailPage() {
           >
             <textarea rows={4} {...register('justification')} />
           </Field>
-          <p className="muted small">{t('admin.aiReminder')}</p>
           <div className="form-footer">
             <Button type="submit">{t('admin.resolve')}</Button>
           </div>
@@ -969,6 +1082,7 @@ export function AdminIncidentDetailPage() {
         })}
         confirmLabel={t('admin.resolve')}
         onConfirm={resolve}
+        busy={saving}
       />
     </>
   );

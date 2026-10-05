@@ -32,9 +32,46 @@ export const evidenceService = {
         incidencia_id: incidentId,
       },
     }),
-  reportIncident: (loanId: string, tipo: string, descripcion: string) =>
-    gatewayRequest<BackendRow>(endpoints.evidence.reportIncident, {
-      body: { prestamo_id: loanId, tipo, descripcion },
+  reportIncident: (
+    loanId: string,
+    tipo: string,
+    descripcion: string,
+    observaciones: string[] = [],
+    photos: File[] = [],
+    requestId?: string,
+  ) => {
+    const report = {
+      prestamo_id: loanId,
+      tipo,
+      descripcion,
+      observaciones,
+      clave_idempotencia: requestId,
+    };
+    const body = new FormData();
+    body.append(
+      'reporte',
+      new Blob([JSON.stringify(report)], { type: 'application/json' }),
+    );
+    photos.forEach((file) => body.append('fotos', file));
+    return gatewayRequest<BackendRow>(endpoints.evidence.reportIncident, {
+      body: photos.length ? body : report,
+    });
+  },
+  list: (signal?: AbortSignal) =>
+    gatewayRequest<BackendRow[]>(endpoints.evidence.incidents, { signal }),
+  statement: (id: string, contenido: string) =>
+    gatewayRequest<BackendRow>(endpoints.evidence.incidentStatement, {
+      params: { id },
+      body: { contenido },
+    }),
+  review: (id: string) =>
+    gatewayRequest<BackendRow>(endpoints.evidence.incidentReview, {
+      params: { id },
+    }),
+  note: (id: string, contenido: string) =>
+    gatewayRequest<BackendRow>(endpoints.evidence.incidentNote, {
+      params: { id },
+      body: { contenido },
     }),
   incident: (id: string, signal?: AbortSignal) =>
     gatewayRequest<BackendRow>(endpoints.evidence.incident, {

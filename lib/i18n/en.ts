@@ -923,8 +923,12 @@ export const en: Messages = {
     },
   },
   incidents: {
-    listGap:
-      'The backend does not provide an incident list for students. You can report an incident and open its immediate detail, but no fabricated history will be shown.',
+    photos: 'Incident photos',
+    photosHint: 'Up to 6 JPG, PNG or WebP photos, maximum 5 MB each.',
+    photoError: 'Select up to 6 valid photos of maximum 5 MB.',
+    loadError: 'We could not load incidents.',
+    retry: 'Retry',
+    loading: 'Loading incidents…',
     eyebrow: 'Trust and safety',
     title: 'Incidents',
     description:
@@ -944,7 +948,7 @@ export const en: Messages = {
       'Once recorded, the deposit will be held until the LendUp team resolves it.',
     submit: 'Record incident',
     emptyTitle: 'You have no incidents',
-    emptyDescription: 'Your loans have no pending situations.',
+    emptyDescription: 'Your loan incidents and their status will appear here.',
     reportedBy: 'Reported by {name} · {date}',
     back: 'Back to incidents',
     notFound: 'Incident not found',
@@ -958,7 +962,7 @@ export const en: Messages = {
     evidence: 'Incident evidence',
     resolution: 'Administrative resolution',
     capturedAmount: 'Deposit amount applied',
-    refundedAmount: 'Balance returned to the borrower',
+    refundedAmount: 'Expected guarantee balance',
     resolvedAt: 'Resolution date',
     resolvedBy: 'Resolved by',
     yourStatement: 'Your statement',
@@ -1019,7 +1023,7 @@ export const en: Messages = {
     resolve: 'Resolve incident',
     confirmTitle: 'Confirm resolution',
     confirmDescription:
-      '{decision}: {captured} of the deposit will be applied and {refunded} will be returned to the borrower. Both parties will be notified.',
+      '{decision}: a deduction of {captured} and an expected balance of {refunded} will be recorded. Both parties will be notified.',
   },
   calendar: {
     eyebrow: 'Your schedule',
@@ -1483,6 +1487,7 @@ export const en: Messages = {
       evidenceRequired: 'Attach at least one piece of final evidence.',
     },
     incident: {
+      updated: 'Incident updated.',
       reported: 'Incident recorded. The deposit was held until it is resolved.',
       statementSaved: 'Statement saved.',
       reviewStarted: 'Review started. Both parties were notified.',

@@ -113,8 +113,11 @@ export function OperationAccessGuard({
   children: ReactNode;
 }) {
   const { id = '' } = useParams();
-  const { state, dataLoading } = useLendUp();
+  const { state, dataLoading, incidentDetailError, retryIncidentDetail } =
+    useLendUp();
   if (dataLoading) return <LoadingSkeleton />;
+  if (kind === 'incident' && incidentDetailError)
+    return <ErrorState onRetry={() => void retryIncidentDetail()} />;
   const allowed =
     kind === 'reservation'
       ? canViewReservation(state, id, state.currentUserId)

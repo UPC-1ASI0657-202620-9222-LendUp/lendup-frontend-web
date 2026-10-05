@@ -67,10 +67,10 @@ Los DTOs REST conservan nombres `snake_case`; los mappers los convierten al mode
 - Gemini crea análisis en estado pendiente; no hay resultado real ni polling disponible.
 - SendGrid/correo todavía no está integrado.
 - `/terminos` no entrega el documento ni sus versiones vigentes, por lo que una nueva aceptación no puede completarse de forma autoritativa.
-- No hay endpoints para categorías, universidades/campus, publicaciones del propietario, imágenes o disponibilidades existentes, evidencias de un préstamo, cambios de fecha, ni lista de incidencias de un estudiante.
+- No hay endpoints para categorías, universidades/campus, publicaciones del propietario, imágenes o disponibilidades existentes, evidencias de un préstamo, cambios de fecha.
 - Extensiones, reprogramaciones y sus respuestas permanecen deshabilitadas porque el backend no permite consultar después esos cambios de fecha.
 - No existen operaciones para registrar declaraciones de contraparte, iniciar revisión o añadir notas administrativas.
-- La bandeja administrativa lista incidencias, pero el backend no expone al administrador el préstamo ni el saldo de garantía asociado; la resolución queda bloqueada sin esos datos autoritativos.
+- Incidencias: historial de participantes, fotos y observaciones, descargo, revisión y notas administrativas, resolución validada con saldo calculado por el servidor. La resolución registra una decisión; las transferencias monetarias requieren integración del proveedor.
 
 La UI muestra o bloquea estas capacidades de forma explícita; nunca las marca como exitosas localmente.
 

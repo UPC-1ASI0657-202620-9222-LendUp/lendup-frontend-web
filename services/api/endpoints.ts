@@ -74,6 +74,16 @@ export const endpoints = {
   evidence: {
     upload: { method: 'POST', path: '/prestamos/{id}/evidencias' },
     analysis: { method: 'POST', path: '/prestamos/{id}/analisis-evidencias' },
+    incidents: { method: 'GET', path: '/incidencias' },
+    incidentStatement: { method: 'POST', path: '/incidencias/{id}/descargo' },
+    incidentReview: {
+      method: 'POST',
+      path: '/admin/incidencias/{id}/revision',
+    },
+    incidentNote: {
+      method: 'POST',
+      path: '/admin/incidencias/{id}/observaciones',
+    },
     reportIncident: { method: 'POST', path: '/incidencias' },
     incident: { method: 'GET', path: '/incidencias/{id}' },
     adminIncidents: { method: 'GET', path: '/admin/incidencias' },

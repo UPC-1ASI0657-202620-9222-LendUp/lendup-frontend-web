@@ -936,8 +936,12 @@ export const es = {
     },
   },
   incidents: {
-    listGap:
-      'El backend no ofrece una lista de incidencias para estudiantes. Puedes reportar una incidencia y abrir su detalle inmediato, pero no se mostrará un historial inventado.',
+    photos: 'Fotos de la incidencia',
+    photosHint: 'Hasta 6 fotos JPG, PNG o WebP de máximo 5 MB cada una.',
+    photoError: 'Selecciona hasta 6 fotos válidas de máximo 5 MB.',
+    loadError: 'No pudimos cargar las incidencias.',
+    retry: 'Reintentar',
+    loading: 'Cargando incidencias…',
     eyebrow: 'Confianza y seguridad',
     title: 'Incidencias',
     description:
@@ -958,7 +962,8 @@ export const es = {
       'Al registrarla, la garantía quedará retenida hasta la resolución del equipo de LendUp.',
     submit: 'Registrar incidencia',
     emptyTitle: 'No tienes incidencias',
-    emptyDescription: 'Tus préstamos no registran situaciones pendientes.',
+    emptyDescription:
+      'Aquí aparecerán las incidencias de tus préstamos y su estado.',
     reportedBy: 'Reportada por {name} · {date}',
     back: 'Volver a incidencias',
     notFound: 'Incidencia no encontrada',
@@ -973,7 +978,7 @@ export const es = {
     evidence: 'Evidencias de la incidencia',
     resolution: 'Resolución administrativa',
     capturedAmount: 'Monto aplicado de la garantía',
-    refundedAmount: 'Saldo devuelto al prestatario',
+    refundedAmount: 'Saldo de garantía previsto',
     resolvedAt: 'Fecha de resolución',
     resolvedBy: 'Resuelta por',
     yourStatement: 'Tu declaración',
@@ -1034,7 +1039,7 @@ export const es = {
     resolve: 'Resolver incidencia',
     confirmTitle: 'Confirmar resolución',
     confirmDescription:
-      '{decision}: se aplicarán {captured} de la garantía y se devolverán {refunded} al prestatario. Ambas partes serán notificadas.',
+      '{decision}: se registrará una afectación de {captured} y un saldo previsto de {refunded}. Ambas partes serán notificadas.',
   },
   calendar: {
     eyebrow: 'Tu agenda',
@@ -1520,6 +1525,7 @@ export const es = {
       evidenceRequired: 'Adjunta al menos una evidencia final.',
     },
     incident: {
+      updated: 'Incidencia actualizada.',
       reported:
         'Incidencia registrada. La garantía quedó retenida hasta su resolución.',
       statementSaved: 'Declaración guardada.',
