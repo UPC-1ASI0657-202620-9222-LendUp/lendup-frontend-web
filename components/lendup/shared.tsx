@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
+import { LogoStacked } from '@/components/lendup/Brand';
 import { useI18n, type MessageKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { googleMapsAdapter } from '@/services/adapters/google-maps';
@@ -415,21 +415,19 @@ export function NotFound({
   );
 }
 
-export function LoadingSkeleton({ cards = 3 }: { cards?: number }) {
+export function LoadingSkeleton(_props: { cards?: number } = {}) {
   const { t } = useI18n();
   return (
-    <output className="loading-grid" aria-label={t('common.loading')}>
-      {Array.from({ length: cards }, (_, index) => (
-        <div className="panel" key={index}>
-          <Skeleton className="h-5 w-2/5" />
-          <Skeleton className="h-9 w-4/5" />
-          <Skeleton className="h-24 w-full" />
-        </div>
-      ))}
+    <output
+      className="app-loader"
+      aria-label={t('common.loading')}
+      aria-busy="true"
+    >
+      <LogoStacked />
+      <span>{t('common.loading')}</span>
     </output>
   );
 }
-
 export function Feedback({
   result,
 }: {
