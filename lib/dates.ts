@@ -1,4 +1,4 @@
-import { appConfig } from '@/config/app-config';
+import { appConfig } from '../config/app-config.ts';
 
 const DAY_MS = 86_400_000;
 const timeZone = appConfig.timeZone;

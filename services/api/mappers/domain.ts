@@ -1,5 +1,5 @@
 import type { BackendRow, CurrentStudentDto } from '@/services/api/dto/backend';
-import { fromApiLocalDateTime } from '@/lib/dates';
+import { fromApiLocalDateTime } from '../../../lib/dates.ts';
 import type {
   AppNotification,
   Incident,
@@ -121,6 +121,18 @@ function availabilitySlots(row: BackendRow): Listing['availabilitySlots'] {
 }
 
 export function mapListing(row: BackendRow): Listing {
+  const images = (
+    Array.isArray(row.imagenes) ? row.imagenes : []
+  ) as BackendRow[];
+  const media = [...images]
+    .sort((a, b) => number(a, 'orden') - number(b, 'orden'))
+    .filter((image) => text(image, 'url').startsWith('https://'))
+    .map((image) => ({
+      id: text(image, 'id'),
+      type: 'PHOTO' as const,
+      url: text(image, 'url'),
+      name: text(row, 'titulo'),
+    }));
   return {
     id: text(row, 'id'),
     ownerId: text(row, 'propietario_usuario_id'),
@@ -140,8 +152,8 @@ export function mapListing(row: BackendRow): Listing {
         : text(row, 'estado') === 'DADA_DE_BAJA'
           ? 'ARCHIVED'
           : 'ACTIVE',
-    image: '/brand/logo-mark-on-light.webp',
-    media: [],
+    image: media[0]?.url ?? '/brand/logo-mark-on-light.webp',
+    media,
     availabilitySlots: availabilitySlots(row),
     terms: {
       usage: text(row, 'condiciones_uso'),

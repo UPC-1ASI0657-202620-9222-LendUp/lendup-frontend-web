@@ -74,13 +74,17 @@ export async function gatewayRequest<T>(
       method: endpoint.method,
       headers: {
         Accept: 'application/json',
-        ...(options.body !== undefined
+        ...(options.body !== undefined && !(options.body instanceof FormData)
           ? { 'Content-Type': 'application/json' }
           : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body:
-        options.body !== undefined ? JSON.stringify(options.body) : undefined,
+        options.body instanceof FormData
+          ? options.body
+          : options.body !== undefined
+            ? JSON.stringify(options.body)
+            : undefined,
       signal: options.signal,
     });
   } catch {
