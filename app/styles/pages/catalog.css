@@ -100,11 +100,14 @@
 .listing-image {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
+  padding: 0.5rem;
+  box-sizing: border-box;
   transition: transform 0.35s ease;
 }
 .listing-card:hover .listing-image {
-  transform: scale(1.04);
+  transform: scale(1.02);
 }
 .listing-flag {
   position: absolute;
@@ -367,7 +370,10 @@
   width: 100%;
   aspect-ratio: 16 / 9;
   border-radius: 0.8rem;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
+  padding: 0.5rem;
+  box-sizing: border-box;
   background: var(--surface-sunken);
 }
 .my-item-main {
