@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { photoSelectionError } from '@/lib/listing-photos';
-import { gatewayRequest } from '@/services/api/http-client';
+import { DomainError, gatewayRequest } from '@/services/api/http-client';
 import { endpoints } from '@/services/api/endpoints';
 import type { Listing, ListingMedia } from '@/types/domain';
 type ImageDto = { id: string; url: string; orden: number };
@@ -66,8 +66,16 @@ export function useListingPhotos(existing?: Listing) {
         setPending((current) => current.filter((value) => value !== file));
       }
       return true;
-    } catch {
-      setError(t('photos.saveFailed'));
+    } catch (cause) {
+      const detail =
+        cause instanceof DomainError && cause.message !== cause.code
+          ? cause.message
+          : '';
+      const status =
+        cause instanceof DomainError && cause.status
+          ? ' (HTTP ' + cause.status + ')'
+          : '';
+      setError(t('photos.saveFailed') + (detail ? ' ' + detail : '') + status);
       return false;
     } finally {
       await queryClient.invalidateQueries({ queryKey: ['listings'] });
