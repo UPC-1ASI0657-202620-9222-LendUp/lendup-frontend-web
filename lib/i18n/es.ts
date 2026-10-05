@@ -832,6 +832,18 @@ export const es = {
     noCaptions: 'Sin subtítulos',
     types: { PHOTO: 'Foto', VIDEO: 'Video', NOTE: 'Nota' },
   },
+  photos: {
+    select: 'Seleccionar fotos',
+    hint: 'Hasta 6 fotos JPG, PNG o WebP, de 5 MB cada una. La primera será la portada. Los cambios se aplican al guardar.',
+    limit: 'Puedes añadir hasta 6 fotos.',
+    format: 'Usa fotos JPG, PNG o WebP.',
+    size: 'Cada foto debe pesar hasta 5 MB y no estar vacía.',
+    saveFailed:
+      'El objeto se guardó, pero no pudimos completar los cambios de fotos. Reintenta guardar; las fotos completadas se conservarán.',
+    preview: 'Foto {index}',
+    remove: 'Quitar foto {index}',
+    removeButton: 'Quitar',
+  },
   uploads: {
     errors: {
       NOT_CONFIGURED:

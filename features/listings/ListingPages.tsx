@@ -1,5 +1,9 @@
 'use client';
 import { useUniversities } from '@/hooks/use-universities';
+import {
+  ListingPhotos,
+  useListingPhotos,
+} from '@/components/lendup/ListingPhotos';
 
 import { useMemo, useState } from 'react';
 import {
@@ -830,6 +834,9 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
   const user = currentUserOf(state);
   const existing = state.listings.find((item) => item.id === id);
   const [result, setResult] = useState<ActionResult | null>(null);
+  const [savedId, setSavedId] = useState<string | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
+  const photos = useListingPhotos(existing);
   const schema = useMemo(
     () =>
       z.object({
@@ -933,17 +940,25 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
         cancellation: values.cancellation,
       },
     };
-    if (existing) {
-      const outcome = await updateListing(existing.id, payload);
-      setResult(outcome);
-      if (outcome.ok) navigate('/my-items');
-      return;
-    }
-    guard(async () => {
-      const outcome = await createListing(payload);
-      setResult(outcome);
-      if (outcome.ok) navigate('/my-items');
-    });
+    const save = async () => {
+      setSaving(true);
+      try {
+        const publicationId = existing?.id ?? savedId;
+        const outcome = publicationId
+          ? await updateListing(publicationId, payload)
+          : await createListing(payload);
+        setResult(outcome);
+        if (!outcome.ok) return;
+        const id = publicationId ?? outcome.id;
+        if (!id) return;
+        setSavedId(id);
+        if (await photos.save(id)) navigate('/my-items');
+      } finally {
+        setSaving(false);
+      }
+    };
+    if (existing || savedId) await save();
+    else guard(save);
   };
 
   const text = (
@@ -1065,11 +1080,7 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
         </section>
         <section>
           <h2>{t('listingForm.sections.photos')}</h2>
-          <div className="upload-zone" aria-disabled="true">
-            <TriangleAlert aria-hidden="true" />
-            <strong>{t('listingForm.photosTitle')}</strong>
-            <span>{t('uploads.errors.NOT_CONFIGURED')}</span>
-          </div>
+          <ListingPhotos photos={photos} disabled={saving || isSubmitting} />
         </section>
         <section>
           <h2>{t('listingForm.sections.conditions')}</h2>
@@ -1127,8 +1138,12 @@ export function ListingFormPage({ edit = false }: { edit?: boolean }) {
           >
             {t('common.cancel')}
           </Button>
-          <Button type="submit" disabled={isSubmitting}>
-            {edit ? t('listingForm.save') : t('listingForm.publish')}
+          <Button type="submit" disabled={isSubmitting || saving}>
+            {saving
+              ? t('common.processing')
+              : edit || savedId
+                ? t('listingForm.save')
+                : t('listingForm.publish')}
           </Button>
         </div>
       </form>

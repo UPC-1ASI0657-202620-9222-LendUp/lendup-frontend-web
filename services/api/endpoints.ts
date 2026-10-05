@@ -12,6 +12,8 @@ export const endpoints = {
     student: { method: 'GET', path: '/estudiantes/{id}' },
   },
   catalog: {
+    uploadImage: { method: 'POST', path: '/objetos/{id}/imagenes' },
+    deleteImage: { method: 'DELETE', path: '/objetos/{id}/imagenes/{imageId}' },
     create: { method: 'POST', path: '/objetos' },
     update: { method: 'PUT', path: '/objetos/{id}' },
     changeStatus: { method: 'PATCH', path: '/objetos/{id}/estado' },

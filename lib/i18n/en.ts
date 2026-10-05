@@ -823,6 +823,18 @@ export const en: Messages = {
     noCaptions: 'No captions',
     types: { PHOTO: 'Photo', VIDEO: 'Video', NOTE: 'Note' },
   },
+  photos: {
+    select: 'Select photos',
+    hint: 'Up to 6 JPG, PNG or WebP photos, 5 MB each. The first is the cover. Changes apply when you save.',
+    limit: 'You can add up to 6 photos.',
+    format: 'Use JPG, PNG or WebP photos.',
+    size: 'Each photo must be non-empty and up to 5 MB.',
+    saveFailed:
+      'The item was saved, but we could not finish the photo changes. Save again to retry; completed photos will be kept.',
+    preview: 'Photo {index}',
+    remove: 'Remove photo {index}',
+    removeButton: 'Remove',
+  },
   uploads: {
     errors: {
       NOT_CONFIGURED:
