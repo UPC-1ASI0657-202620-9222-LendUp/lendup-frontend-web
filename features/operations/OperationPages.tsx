@@ -150,7 +150,7 @@ function PartyCard({
         detail={`${findUniversity(user.universityId)?.shortName ?? user.universityId} · ${user.campus}`}
       />
       <Reputation value={reputation.average} count={reputation.count} />
-      {showPhone ? (
+      {showPhone && user.phone ? (
         <div className="contact-card">
           <Phone aria-hidden="true" />
           <div>
@@ -158,6 +158,8 @@ function PartyCard({
             <a href={`tel:${user.phone.replace(/\s/g, '')}`}>{user.phone}</a>
           </div>
         </div>
+      ) : showPhone ? (
+        <p className="muted small">{t('operations.phoneUnavailable')}</p>
       ) : (
         <p className="muted small">{t('operations.phoneHidden')}</p>
       )}
@@ -1078,8 +1080,22 @@ export function DeliveryPage() {
       t('delivery.checks.reservation'),
       reservation.status === 'CONFIRMED' && !reservation.deliveryRecorded,
     ],
-    [t('delivery.checks.payment'), paymentOk],
-    [t('delivery.checks.guarantee'), guaranteeOk],
+    [
+      t(
+        paymentOk
+          ? 'delivery.checks.payment'
+          : 'delivery.checks.paymentPending',
+      ),
+      paymentOk,
+    ],
+    [
+      t(
+        guaranteeOk
+          ? 'delivery.checks.guarantee'
+          : 'delivery.checks.guaranteePending',
+      ),
+      guaranteeOk,
+    ],
   ];
   const ready = checks.every(([, ok]) => ok);
 

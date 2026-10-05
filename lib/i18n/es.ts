@@ -573,6 +573,7 @@ export const es = {
     nextStep: 'Siguiente paso',
     periodAndPlace: 'Periodo y lugar',
     contactTitle: 'Contacto para coordinar',
+    phoneUnavailable: 'Número de contacto no disponible.',
     phoneHidden:
       'El teléfono se muestra solo mientras la reserva o el préstamo estén vigentes.',
     frozenConditions: 'Condiciones registradas',
@@ -666,7 +667,9 @@ export const es = {
     checks: {
       reservation: 'Reserva confirmada y sin entrega registrada',
       payment: 'Pago de la tarifa aprobado',
+      paymentPending: 'Pago de la tarifa pendiente',
       guarantee: 'Garantía constituida o no requerida',
+      guaranteePending: 'Garantía pendiente de constitución',
     },
     notReady:
       'Aún no se cumplen todos los requisitos para registrar la entrega.',

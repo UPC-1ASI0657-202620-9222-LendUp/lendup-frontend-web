@@ -99,6 +99,22 @@ export function fromApiLocalDateTime(value: string) {
   return fromZonedInput(value.replace(' ', 'T'));
 }
 
+/**
+ * Converts an audit timestamp produced by the backend's UTC clock into an ISO
+ * instant. Unlike scheduled loan dates, these values are UTC even when the
+ * serialized LocalDateTime does not include an offset.
+ */
+export function fromApiUtcDateTime(value: string) {
+  if (!value) return '';
+  if (value.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(value)) {
+    return new Date(value).toISOString();
+  }
+  const normalized = value
+    .replace(' ', 'T')
+    .replace(/(\.\d{3})\d+$/, '$1');
+  return new Date(`${normalized}Z`).toISOString();
+}
+
 export function atZonedTime(day: Date | string, hour: number, minute = 0) {
   const key = typeof day === 'string' ? day : zonedDayKey(day);
   return fromZonedInput(`${key}T${pad(hour)}:${pad(minute)}`);

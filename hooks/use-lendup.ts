@@ -274,6 +274,27 @@ export function useLendUp() {
       staleTime: 30_000,
     })),
   });
+  const contactReservationId =
+    location.pathname.match(/^\/reservations\/([^/]+)$/)?.[1] ??
+    loans.find(
+      (loan) => loan.id === location.pathname.match(/^\/loans\/([^/]+)$/)?.[1],
+    )?.reservationId;
+  const contactTargets = reservations.filter(
+    (reservation) =>
+      reservation.id === contactReservationId &&
+      ['CONFIRMED', 'ACTIVATED'].includes(reservation.status) &&
+      (reservation.borrowerId === currentUser?.id ||
+        reservation.lenderId === currentUser?.id),
+  );
+  const contactQueries = useQueries({
+    queries: contactTargets.map((reservation) => ({
+      queryKey: ['reservation-contact', reservation.id, currentUser?.id],
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        reservationsService.contact(reservation.id, signal),
+      enabled,
+      staleTime: 30_000,
+    })),
+  });
   const reputationQueries = useQueries({
     queries: [currentUser?.id, ...relatedUserIds].filter(Boolean).map((id) => ({
       queryKey: ['reputation', id],
@@ -292,12 +313,26 @@ export function useLendUp() {
     })),
   });
 
+  const contactPhones = new Map(
+    contactTargets.flatMap((reservation, index) => {
+      const phone = contactQueries[index]?.data?.telefono?.trim();
+      if (!phone || !currentUser) return [];
+      const counterpartyId =
+        reservation.borrowerId === currentUser.id
+          ? reservation.lenderId
+          : reservation.borrowerId;
+      return [[counterpartyId, phone] as const];
+    }),
+  );
   const users = [
     ...(currentUser ? [currentUser] : []),
     ...publicUserQueries.flatMap((query) =>
       query.data ? [mapPublicStudent(query.data)] : [],
     ),
-  ];
+  ].map((user) => ({
+    ...user,
+    phone: user.phone || contactPhones.get(user.id) || '',
+  }));
   const ratings = reputationQueries.flatMap(
     (query) => query.data?.calificaciones.map(mapRating) ?? [],
   );

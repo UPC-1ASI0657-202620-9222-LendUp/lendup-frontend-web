@@ -139,7 +139,12 @@ function createFormatters(locale: Locale) {
     formatWeekday: safe(weekday),
     formatDayNumber: safe(dayNumber),
     formatRelative: (value: string) => {
-      const diff = new Date(value).getTime() - Date.now();
+      const parsed = new Date(value).getTime();
+      if (Number.isNaN(parsed)) return '—';
+      // Activity is always elapsed. Avoid presenting minor clock skew as if
+      // an already-created request were going to be sent in the future.
+      const diff = Math.min(0, parsed - Date.now());
+      if (Math.abs(diff) < 60_000) return relative.format(0, 'second');
       const minutes = Math.round(diff / 60_000);
       if (Math.abs(minutes) < 60) return relative.format(minutes, 'minute');
       const hours = Math.round(minutes / 60);

@@ -1,5 +1,8 @@
 import type { BackendRow, CurrentStudentDto } from '@/services/api/dto/backend';
-import { fromApiLocalDateTime } from '../../../lib/dates.ts';
+import {
+  fromApiLocalDateTime,
+  fromApiUtcDateTime,
+} from '../../../lib/dates.ts';
 import { categoryCodeForId } from '../../../config/reference-data.ts';
 import type {
   Evidence,
@@ -23,8 +26,18 @@ const text = (row: BackendRow, key: string) => {
     : '';
 };
 const number = (row: BackendRow, key: string) => Number(row[key] ?? 0);
-const iso = (row: BackendRow, key: string) =>
-  text(row, key) || new Date(0).toISOString();
+const instant = (row: BackendRow, key: string) => {
+  const value = text(row, key);
+  return value ? fromApiUtcDateTime(value) : new Date(0).toISOString();
+};
+const optionalInstant = (row: BackendRow, key: string) => {
+  const value = text(row, key);
+  return value ? fromApiUtcDateTime(value) : undefined;
+};
+const localInstant = (row: BackendRow, key: string) => {
+  const value = text(row, key);
+  return value ? fromApiLocalDateTime(value) : new Date(0).toISOString();
+};
 const initials = (name: string) =>
   name
     .split(/\s+/)
@@ -161,7 +174,7 @@ export function mapListing(row: BackendRow): Listing {
       returnPolicy: text(row, 'condiciones_devolucion'),
       cancellation: text(row, 'condiciones_cancelacion'),
     },
-    createdAt: iso(row, 'creado_en'),
+    createdAt: instant(row, 'creado_en'),
   };
 }
 
@@ -172,15 +185,15 @@ function requestSnapshot(row: BackendRow): TermsSnapshot {
     commissionRate: 0,
     providerFeeRate: 0,
     exchangePlace: text(row, 'lugar_intercambio_aceptado'),
-    startAt: iso(row, 'desde'),
-    endAt: iso(row, 'hasta'),
-    originalEndAt: iso(row, 'hasta'),
+    startAt: localInstant(row, 'desde'),
+    endAt: localInstant(row, 'hasta'),
+    originalEndAt: localInstant(row, 'hasta'),
     usage: text(row, 'condiciones_uso_aceptadas'),
     delivery: text(row, 'condiciones_entrega_aceptadas'),
     returnPolicy: text(row, 'condiciones_devolucion_aceptadas'),
     cancellation: text(row, 'condiciones_cancelacion_aceptadas'),
     cancellationPolicy: { borrowerRefundRate: 0, lenderRefundRate: 0 },
-    acceptedAt: iso(row, 'condiciones_aceptadas_en'),
+    acceptedAt: instant(row, 'condiciones_aceptadas_en'),
   };
 }
 
@@ -196,11 +209,11 @@ export function mapRequest(row: BackendRow): LoanRequest {
     listingId: text(row, 'publicacion_id'),
     borrowerId: text(row, 'prestatario_usuario_id'),
     lenderId: text(row, 'prestamista_usuario_id'),
-    startAt: iso(row, 'desde'),
-    endAt: iso(row, 'hasta'),
+    startAt: localInstant(row, 'desde'),
+    endAt: localInstant(row, 'hasta'),
     status: states[text(row, 'estado')] ?? 'PENDING',
-    createdAt: iso(row, 'creada_en'),
-    respondedAt: text(row, 'respondida_en') || undefined,
+    createdAt: instant(row, 'creada_en'),
+    respondedAt: optionalInstant(row, 'respondida_en'),
     snapshot: requestSnapshot(row),
   };
 }
@@ -209,8 +222,8 @@ export function mapReservation(
   row: BackendRow,
   request?: LoanRequest,
 ): Reservation {
-  const startAt = iso(row, 'desde');
-  const endAt = iso(row, 'hasta');
+  const startAt = localInstant(row, 'desde');
+  const endAt = localInstant(row, 'hasta');
   return {
     id: text(row, 'id'),
     requestId: text(row, 'solicitud_id'),
@@ -224,10 +237,10 @@ export function mapReservation(
         ? 'PENDING'
         : 'NOT_REQUIRED',
     deliveryRecorded: false,
-    cancelledAt: text(row, 'cancelada_en') || undefined,
+    cancelledAt: optionalInstant(row, 'cancelada_en'),
     cancelledBy: text(row, 'cancelada_por_usuario_id') || undefined,
     cancellationReason: text(row, 'motivo_cancelacion') || undefined,
-    createdAt: iso(row, 'confirmada_en'),
+    createdAt: instant(row, 'confirmada_en'),
     snapshot: {
       dailyRate: number(row, 'tarifa_diaria_acordada'),
       guaranteeAmount: number(row, 'garantia_monetaria_acordada'),
@@ -242,7 +255,7 @@ export function mapReservation(
       returnPolicy: text(row, 'condiciones_devolucion_acordadas'),
       cancellation: text(row, 'condiciones_cancelacion_acordadas'),
       cancellationPolicy: { borrowerRefundRate: 0, lenderRefundRate: 0 },
-      acceptedAt: iso(row, 'confirmada_en'),
+      acceptedAt: instant(row, 'confirmada_en'),
     },
   };
 }
@@ -270,7 +283,7 @@ export function mapEvidence(row: BackendRow): Evidence {
     url: text(row, 'url') || undefined,
     author: text(row, 'registrada_por_usuario_id'),
     authorId: text(row, 'registrada_por_usuario_id'),
-    createdAt: iso(row, 'registrada_en'),
+    createdAt: instant(row, 'registrada_en'),
   };
 }
 
@@ -284,8 +297,8 @@ export function mapLoan(row: BackendRow, reservation?: Reservation): Loan {
     FINALIZADO: 'COMPLETED',
     CANCELADO: 'COMPLETED',
   };
-  const startAt = iso(row, 'entrega_programada_en');
-  const originalEndAt = iso(row, 'devolucion_original_en');
+  const startAt = localInstant(row, 'entrega_programada_en');
+  const originalEndAt = localInstant(row, 'devolucion_original_en');
   return {
     id: text(row, 'id'),
     reservationId: text(row, 'reserva_id'),
@@ -315,14 +328,14 @@ export function mapLoan(row: BackendRow, reservation?: Reservation): Loan {
       returnPolicy: '',
       cancellation: '',
       cancellationPolicy: { borrowerRefundRate: 0, lenderRefundRate: 0 },
-      acceptedAt: iso(row, 'creado_en'),
+      acceptedAt: instant(row, 'creado_en'),
     },
-    deliveredAt: text(row, 'entrega_registrada_en') || undefined,
-    currentReturnAt: iso(row, 'devolucion_vigente_en'),
+    deliveredAt: optionalInstant(row, 'entrega_registrada_en'),
+    currentReturnAt: localInstant(row, 'devolucion_vigente_en'),
     originalReturnAt: originalEndAt,
-    actualReturnAt: text(row, 'devolucion_registrada_en') || undefined,
-    receiptConfirmedAt: text(row, 'recepcion_confirmada_en') || undefined,
-    completedAt: text(row, 'finalizado_en') || undefined,
+    actualReturnAt: optionalInstant(row, 'devolucion_registrada_en'),
+    receiptConfirmedAt: optionalInstant(row, 'recepcion_confirmada_en'),
+    completedAt: optionalInstant(row, 'finalizado_en'),
     extensions: [],
     reschedules: [],
     evidence: childRows(row, 'evidencias').map(mapEvidence),
@@ -336,7 +349,7 @@ export function mapLoan(row: BackendRow, reservation?: Reservation): Loan {
       ] as [string, TimelineEventCode][]
     ).flatMap(([key, event]) =>
       text(row, key)
-        ? [{ id: key, event, at: text(row, key), complete: true }]
+        ? [{ id: key, event, at: instant(row, key), complete: true }]
         : [],
     ),
     ratedBy: [],
@@ -372,16 +385,16 @@ export function mapIncident(row: BackendRow): Incident {
       : text(row, 'revision_iniciada_en')
         ? 'UNDER_REVIEW'
         : 'OPEN',
-    createdAt: iso(row, 'reportada_en'),
-    reviewStartedAt: text(row, 'revision_iniciada_en') || undefined,
+    createdAt: instant(row, 'reportada_en'),
+    reviewStartedAt: optionalInstant(row, 'revision_iniciada_en'),
     reviewedBy: text(row, 'resuelta_por_usuario_id') || undefined,
     counterpartyStatement: text(row, 'descargo') || undefined,
-    counterpartyStatementAt: text(row, 'descargo_en') || undefined,
+    counterpartyStatementAt: optionalInstant(row, 'descargo_en'),
     adminNotes: childRows(row, 'observaciones').map((note) => ({
       id: text(note, 'id'),
       adminId: text(note, 'administrador_usuario_id'),
       text: text(note, 'contenido'),
-      createdAt: iso(note, 'registrada_en'),
+      createdAt: instant(note, 'registrada_en'),
     })),
     guaranteeAmount: number(row, 'garantia_monetaria_acordada'),
     resolution: resolved
@@ -390,7 +403,7 @@ export function mapIncident(row: BackendRow): Incident {
           amount: number(row, 'monto_garantia_afectado'),
           refundedAmount: number(row, 'saldo_garantia_previsto'),
           justification: text(row, 'justificacion_resolucion'),
-          resolvedAt: iso(row, 'resuelta_en'),
+          resolvedAt: instant(row, 'resuelta_en'),
           resolvedBy: text(row, 'resuelta_por_usuario_id'),
         }
       : undefined,
@@ -415,7 +428,7 @@ export function mapNotification(row: BackendRow): AppNotification {
     title: text(row, 'titulo') || undefined,
     message: text(row, 'mensaje') || undefined,
     params: { item: text(row, 'titulo'), reason: text(row, 'mensaje') },
-    createdAt: iso(row, 'creada_en'),
+    createdAt: instant(row, 'creada_en'),
     read: text(row, 'estado') === 'LEIDA',
     href,
   };
@@ -447,8 +460,8 @@ export function mapTransaction(
     userId,
     loanId: text(row, 'prestamo_id') || undefined,
     incidentId: text(row, 'incidencia_id') || undefined,
-    createdAt: iso(row, 'solicitada_en'),
-    updatedAt: iso(row, 'actualizada_en'),
+    createdAt: instant(row, 'solicitada_en'),
+    updatedAt: instant(row, 'actualizada_en'),
     type: types[text(row, 'tipo')] ?? 'RENTAL_PAYMENT',
     amount: number(row, 'monto'),
     currency: 'PEN',
@@ -466,6 +479,6 @@ export function mapRating(row: BackendRow): Rating {
     authorId: text(row, 'evaluador_usuario_id'),
     targetUserId: text(row, 'evaluado_usuario_id'),
     loanId: text(row, 'prestamo_id'),
-    createdAt: iso(row, 'registrada_en'),
+    createdAt: instant(row, 'registrada_en'),
   };
 }

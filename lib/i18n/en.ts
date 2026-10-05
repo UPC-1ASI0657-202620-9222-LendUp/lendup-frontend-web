@@ -569,6 +569,7 @@ export const en: Messages = {
     nextStep: 'Next step',
     periodAndPlace: 'Period and place',
     contactTitle: 'Contact to coordinate',
+    phoneUnavailable: 'Contact number unavailable.',
     phoneHidden:
       'The phone is only shown while the reservation or loan is active.',
     frozenConditions: 'Recorded terms',
@@ -662,7 +663,9 @@ export const en: Messages = {
     checks: {
       reservation: 'Confirmed reservation with no handover recorded',
       payment: 'Rate payment approved',
+      paymentPending: 'Rate payment pending',
       guarantee: 'Deposit placed or not required',
+      guaranteePending: 'Deposit funding pending',
     },
     notReady: 'Not all requirements to record the handover are met yet.',
     evidenceTitle: 'Initial evidence',
