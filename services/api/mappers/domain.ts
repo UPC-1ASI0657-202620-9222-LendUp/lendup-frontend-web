@@ -262,6 +262,12 @@ export function mapReservation(
 
 const childRows = (row: BackendRow, key: string): BackendRow[] =>
   Array.isArray(row[key]) ? (row[key] as BackendRow[]) : [];
+const childRow = (row: BackendRow, key: string): BackendRow | undefined => {
+  const value = row[key];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as BackendRow)
+    : undefined;
+};
 export function mapEvidence(row: BackendRow): Evidence {
   const note = text(row, 'observacion');
   return {
@@ -413,14 +419,17 @@ export function mapIncident(row: BackendRow): Incident {
 export function mapNotification(row: BackendRow): AppNotification {
   const origin = text(row, 'origen_tipo');
   const originId = text(row, 'origen_id');
-  const href =
-    origin === 'RESERVA'
-      ? `/reservations/${originId}`
-      : origin === 'PRESTAMO'
-        ? `/loans/${originId}`
-        : origin === 'INCIDENCIA'
-          ? `/incidents/${originId}`
-          : '/notifications';
+  // PAGO and GARANTIA carry the transaction or guarantee id and EXTENSION the date-change id, not the loan id.
+  const links: Record<string, string> = {
+    SOLICITUD: '/requests',
+    RESERVA: `/reservations/${originId}`,
+    PRESTAMO: `/loans/${originId}`,
+    EXTENSION: '/loans',
+    PAGO: '/transactions',
+    GARANTIA: '/transactions',
+    INCIDENCIA: `/incidents/${originId}`,
+  };
+  const href = links[origin] ?? '/notifications';
   return {
     id: text(row, 'id'),
     userId: text(row, 'destinatario_usuario_id'),
@@ -442,9 +451,28 @@ export function mapTransaction(
     PAGO_TARIFA: 'RENTAL_PAYMENT',
     PAGO_EXTENSION: 'EXTENSION_PAYMENT',
     CONSTITUCION_GARANTIA: 'GUARANTEE_HOLD',
+    LIBERACION_TARIFA: 'RENTAL_RELEASE',
+    DEVOLUCION_GARANTIA: 'GUARANTEE_RELEASE',
+    RETENCION_GARANTIA: 'GUARANTEE_PARTIAL_CAPTURE',
+    REEMBOLSO_TARIFA: 'REFUND',
+  };
+  const type = types[text(row, 'tipo')] ?? 'RENTAL_PAYMENT';
+  // lendup-payments-service uses PENDIENTE, CONFIRMADA, RECHAZADA, CANCELADA and FALLIDA; what
+  // "confirmed" means depends on the transaction type. The Sprint 1 states stay for older rows.
+  const confirmed: Record<PaymentTransaction['type'], PaymentTransaction['status']> = {
+    RENTAL_PAYMENT: 'PENDING_RELEASE',
+    EXTENSION_PAYMENT: 'PENDING_RELEASE',
+    GUARANTEE_HOLD: 'HELD',
+    RENTAL_RELEASE: 'RELEASED',
+    GUARANTEE_RELEASE: 'RELEASED',
+    GUARANTEE_PARTIAL_CAPTURE: 'PARTIALLY_CAPTURED',
+    GUARANTEE_CAPTURE: 'CAPTURED',
+    REFUND: 'REFUNDED',
   };
   const statuses: Record<string, PaymentTransaction['status']> = {
     PENDIENTE: 'PENDING',
+    CONFIRMADA: confirmed[type],
+    RECHAZADA: 'FAILED',
     PROCESANDO: 'PROCESSING',
     PENDIENTE_LIBERACION: 'PENDING_RELEASE',
     LIBERADA: 'RELEASED',
@@ -455,6 +483,20 @@ export function mapTransaction(
     AFECTADA_PARCIALMENTE: 'PARTIALLY_CAPTURED',
     AFECTADA: 'CAPTURED',
   };
+  // A confirmed guarantee payment follows its guarantee afterwards (returned, retained...).
+  const guarantee = childRow(row, 'garantia');
+  const guaranteeStatuses: Record<string, PaymentTransaction['status']> = {
+    DEVUELTA: 'RELEASED',
+    AFECTADA_PARCIALMENTE: 'PARTIALLY_CAPTURED',
+    AFECTADA_TOTALMENTE: 'CAPTURED',
+  };
+  const status =
+    type === 'GUARANTEE_HOLD' &&
+    text(row, 'estado') === 'CONFIRMADA' &&
+    guarantee &&
+    guaranteeStatuses[text(guarantee, 'estado')]
+      ? guaranteeStatuses[text(guarantee, 'estado')]
+      : (statuses[text(row, 'estado')] ?? 'PENDING');
   return {
     id: text(row, 'id'),
     userId,
@@ -462,12 +504,12 @@ export function mapTransaction(
     incidentId: text(row, 'incidencia_id') || undefined,
     createdAt: instant(row, 'solicitada_en'),
     updatedAt: instant(row, 'actualizada_en'),
-    type: types[text(row, 'tipo')] ?? 'RENTAL_PAYMENT',
+    type,
     amount: number(row, 'monto'),
     currency: 'PEN',
     method: text(row, 'medio_pago_seleccionado'),
     providerReference: text(row, 'referencia_proveedor'),
-    status: statuses[text(row, 'estado')] ?? 'PENDING',
+    status,
   };
 }
 
