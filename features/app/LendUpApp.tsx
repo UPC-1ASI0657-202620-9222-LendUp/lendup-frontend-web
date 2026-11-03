@@ -34,6 +34,7 @@ import {
   DeliveryPage,
   LoanDetailPage,
   LoansPage,
+  PaymentReturnPage,
   RequestsPage,
   ReservationDetailPage,
   ReservationsPage,
@@ -151,6 +152,7 @@ function AppRoutes() {
               />
               <Route path="/calendar" element={<CalendarPage />} />
               <Route path="/transactions" element={<TransactionsPage />} />
+              <Route path="/payments/return" element={<PaymentReturnPage />} />
             </Route>
             <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/profile" element={<ProfilePage />} />

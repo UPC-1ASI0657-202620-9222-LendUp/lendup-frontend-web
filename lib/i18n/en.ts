@@ -621,7 +621,7 @@ export const en: Messages = {
     },
     methodHints: {
       CARD: 'Visa, Mastercard or American Express',
-      WALLET: 'Immediate confirmation with a recorded receipt',
+      WALLET: 'Mercado Pago opens to complete the payment',
       ACCOUNT_MONEY: 'Available balance in your account',
       CASH: 'Code to pay at agents or online banking',
     },
@@ -639,10 +639,11 @@ export const en: Messages = {
     rentalLocked: 'Available once the security deposit is placed.',
     guaranteeDone: 'Deposit placed successfully.',
     rentalDone: 'Rate payment approved.',
-    payWithProvider: 'Confirm payment of {amount}',
-    processing: 'Processing payment…',
+    payWithProvider: 'Pay {amount} with Mercado Pago',
+    resumeWithProvider: 'Continue the payment in Mercado Pago',
+    processing: 'Opening Mercado Pago…',
     providerPending:
-      'The operation was recorded and is being confirmed.',
+      'There is a payment started in Mercado Pago. If you already paid, the confirmation arrives in a few seconds; otherwise you can continue it.',
     allDone:
       'Done: payment and deposit are confirmed. The lender can now record the handover.',
     security:
@@ -652,6 +653,32 @@ export const en: Messages = {
     closedTitle: 'This reservation no longer accepts payments',
     closedDescription:
       'The reservation was cancelled or the loan already started.',
+  },
+  paymentReturn: {
+    eyebrow: 'Mercado Pago',
+    continue: 'Continue',
+    tryAgain: 'Try again',
+    viewTransactions: 'View my transactions',
+    unknownTitle: 'We could not identify the payment',
+    unknownDescription:
+      'Check its status in your transactions; it is updated when Mercado Pago confirms it.',
+    confirmed: {
+      title: 'Payment confirmed',
+      description: 'Mercado Pago confirmed the payment and LendUp recorded it.',
+      status: 'Confirmed',
+    },
+    rejected: {
+      title: 'The payment was not completed',
+      description:
+        'Mercado Pago did not approve the payment or it was cancelled. You can try again.',
+      status: 'Not completed',
+    },
+    pending: {
+      title: 'We are confirming your payment',
+      description:
+        'Mercado Pago is processing it. This page updates by itself; you can also come back later.',
+      status: 'Pending confirmation',
+    },
   },
   delivery: {
     eyebrow: 'Item handover',
@@ -1447,6 +1474,10 @@ export const en: Messages = {
     payment: {
       guaranteeConfirmed: 'Security deposit confirmed successfully.',
       rentalConfirmed: 'Rate payment confirmed successfully.',
+      redirecting: 'Taking you to Mercado Pago to complete the payment.',
+      alreadyConfirmed: 'This payment was already confirmed.',
+      checkoutUnavailable:
+        'Mercado Pago is not available right now. Try again in a few minutes.',
     },
     delivery: {
       recorded:
