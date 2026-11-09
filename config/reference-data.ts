@@ -102,6 +102,17 @@ export const categoryIds: Record<CategoryCode, string> = {
   ELECTRONICS: '00000000-0000-4000-8000-000000000008',
 };
 
+// Identificadores estables sembrados por la migración V2 de Catálogo en AWS.
+// Los IDs del monolito Render se conservan en categoryIds.
+export const awsCategoryIds: Record<CategoryCode, string> = {
+  OTHER: 'c0000000-0000-4000-8000-000000000008',
+  CALCULATORS: 'c0000000-0000-4000-8000-000000000002',
+  CAMERAS: 'c0000000-0000-4000-8000-000000000001',
+  BOOKS: 'c0000000-0000-4000-8000-000000000003',
+  TOOLS: 'c0000000-0000-4000-8000-000000000006',
+  ELECTRONICS: 'c0000000-0000-4000-8000-000000000007',
+};
+
 export const categories: CategoryCode[] = [
   'CALCULATORS',
   'CAMERAS',
@@ -112,9 +123,9 @@ export const categories: CategoryCode[] = [
 ];
 
 export function categoryCodeForId(id: string): CategoryCode {
-  const entry = Object.entries(categoryIds).find(
+  const entry = Object.entries({ ...categoryIds, ...awsCategoryIds }).find(
     ([, categoryId]) => categoryId === id,
-  );
+  ) ?? Object.entries(categoryIds).find(([, categoryId]) => categoryId === id);
   return entry ? (entry[0] as CategoryCode) : 'OTHER';
 }
 export const conditions: ConditionCode[] = [
