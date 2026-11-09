@@ -7,8 +7,13 @@ export type Locale = 'es' | 'en';
 export const supportedLocales: readonly Locale[] = ['es', 'en'];
 
 export const appConfig = {
+  // Alias compatible con configuraciones anteriores del frontend.
   apiGatewayUrl:
-    env.VITE_API_GATEWAY_URL ?? 'https://lendup-backend.onrender.com/api/v1',
+    env.VITE_RENDER_API_GATEWAY_URL ?? env.VITE_API_GATEWAY_URL ?? 'https://lendup-backend.onrender.com/api/v1',
+  renderApiGatewayUrl:
+    env.VITE_RENDER_API_GATEWAY_URL ?? env.VITE_API_GATEWAY_URL ?? 'https://lendup-backend.onrender.com/api/v1',
+  // Vacío = comportamiento anterior: todas las solicitudes siguen en Render.
+  awsApiGatewayUrl: env.VITE_AWS_API_GATEWAY_URL?.trim() ?? '',
   defaultLocale: (env.VITE_DEFAULT_LOCALE === 'en' ? 'en' : 'es') as Locale,
   currency: 'PEN',
   timeZone: env.VITE_TIME_ZONE ?? 'America/Lima',

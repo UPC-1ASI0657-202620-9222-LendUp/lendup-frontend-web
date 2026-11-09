@@ -1,6 +1,6 @@
 # LendUp frontend web
 
-Frontend de producción de LendUp. Consume exclusivamente la API Spring Boot real y usa Firebase Authentication en el navegador. No contiene usuarios, tokens, entidades ni persistencia de negocio en memoria.
+Frontend de LendUp. Mantiene el monolito modular en Render y permite migrar por contexto los seis microservicios al Spring Cloud Gateway de AWS. Usa Firebase Authentication en el navegador. No contiene usuarios, tokens, entidades ni persistencia de negocio en memoria.
 
 ## Stack y arquitectura
 
@@ -23,7 +23,9 @@ Firebase es la fuente de verdad de la sesión. Cada llamada protegida obtiene el
 Copia `.env.example` a `.env.local` y completa únicamente valores públicos del cliente Firebase:
 
 ```env
-VITE_API_GATEWAY_URL=https://lendup-backend.onrender.com/api/v1
+VITE_RENDER_API_GATEWAY_URL=https://lendup-backend.onrender.com/api/v1
+# Dejar en blanco hasta contar con un dominio HTTPS válido en AWS:
+VITE_AWS_API_GATEWAY_URL=
 VITE_FIREBASE_API_KEY=
 VITE_FIREBASE_AUTH_DOMAIN=
 VITE_FIREBASE_PROJECT_ID=
@@ -37,7 +39,7 @@ VITE_TIME_ZONE=America/Lima
 
 No uses credenciales Firebase Admin, service accounts, claves privadas de MySQL, Mercado Pago, Cloudinary o Gemini. Toda variable `VITE_*` es visible en el navegador.
 
-Para el backend local usa `VITE_API_GATEWAY_URL=http://localhost:8080/api/v1`. El proyecto Firebase del cliente debe coincidir con el configurado en el backend.
+Para el backend local usa `VITE_RENDER_API_GATEWAY_URL=http://localhost:8080/api/v1`. La variable antigua `VITE_API_GATEWAY_URL` continúa siendo compatible cuando no se configura la nueva variable Render. El proyecto Firebase del cliente debe coincidir con el configurado en el backend.
 
 ## Desarrollo y validación
 
@@ -60,6 +62,26 @@ Los scripts Playwright requieren `QA_EMAIL`, `QA_PASSWORD`, `LOCAL_URL` y, cuand
 
 Los DTOs REST conservan nombres `snake_case`; los mappers los convierten al modelo camelCase de la UI. No añadas `/api/v1` a las rutas internas porque la URL base ya lo incluye.
 
+## Integración híbrida AWS + Render (migración gradual)
+
+El cliente HTTP central utiliza `services/api/request-routing.ts` y envía una solicitud a **un solo destino**. No hace reintentos automáticos de escrituras sobre otro backend. El comportamiento depende de variables `VITE_*` disponibles durante la **compilación** de Cloudflare Workers:
+
+- `VITE_RENDER_API_GATEWAY_URL`: base HTTPS del monolito Render, incluyendo `/api/v1`. Si está ausente se admite la variable heredada `VITE_API_GATEWAY_URL`.
+- `VITE_AWS_API_GATEWAY_URL`: base pública HTTPS del Spring Cloud Gateway, incluyendo `/api/v1`. Si está vacía, todo continúa en Render. HTTP únicamente está permitido para localhost durante desarrollo.
+
+Al establecer AWS, las rutas de **Identidad** (`/estudiantes`, `/universidades`), **Catálogo** (`/catalogo/**`), **Reservas** (`/solicitudes/**`, `/reservas/**`), **Pagos** (`/medios-pago`, `/pagos/**`, `/garantias/**`, `/prestamos/{id}/transacciones`), **Notificaciones** y **Reputación** (`/estudiantes/{id}/reputacion`, `/prestamos/{id}/calificaciones`) usan AWS. Préstamos (excepto las rutas específicas de Pagos/Reputación), Evidencias, Incidencias, Calendario, `/terminos` y otros endpoints heredados permanecen en Render.
+
+El adaptador `services/api/catalog-compat.ts` traduce `/objetos` a `/catalogo/publicaciones`, `PUT` parcial a `PATCH` y `PUT /disponibilidad` a `POST /disponibilidades`, y mapea los DTO anidados de ASP.NET Core al modelo actual. También convierte identificadores de categorías según la migración V2 de Catálogo. **Limitación:** el listado del nuevo servicio no incluye imágenes; hasta ampliar la carga de imágenes se visualizará el recurso de reserva por defecto. El filtro `ubicacion` se aplica localmente porque ese query no está implementado por Catálogo AWS.
+
+### Requisitos previos al cambio de Cloudflare
+
+1. Publicar el Gateway de AWS detrás de un dominio **HTTPS** con certificado válido (por ejemplo, ALB + ACM). La IP `http://100.48.16.62:8090` de Postman **no** sirve como base en el navegador HTTPS.
+2. Configurar los seis destinos privados del Gateway, y `MONOLITH_URL=https://lendup-backend.onrender.com` para los módulos no extraídos. Verificar que todas las rutas y servicios respondan por ese Gateway; configurar `CORS_ORIGINS` para el dominio real del frontend.
+3. Confirmar que Firebase usa el mismo proyecto en microservicios y navegador, que los datos de Identidad son accesibles por Catálogo y que los préstamos de Render pueden referenciar reservas/publicaciones de AWS. **No habilitar el flujo completo de negocio sin esta integración de datos**: los IDs generados en un backend pueden no existir en el otro.
+4. Configurar `VITE_AWS_API_GATEWAY_URL=https://DOMINIO_PUBLICO_AWS/api/v1` en el entorno de compilación Cloudflare, ejecutar `npm run build` y redesplegar. Verificar en DevTools > Network qué host recibe cada solicitud, y probar login, Catálogo, solicitud, pago, entrega y devolución.
+
+Para deshacer el cambio sin modificar los endpoints, vaciar `VITE_AWS_API_GATEWAY_URL` y volver a desplegar el frontend; todas las peticiones regresarán al monolito Render.
+
 ## Limitaciones conocidas del backend
 
 - Los pagos de tarifa y la constitución de garantía se confirman mediante el flujo de pago habilitado por la API.
@@ -79,7 +101,7 @@ La UI muestra o bloquea estas capacidades de forma explícita; nunca las marca c
 1. Configura las variables públicas anteriores en el proyecto Cloudflare.
 2. Ejecuta `npm ci && npm run build`.
 3. Despliega usando `dist/server/wrangler.json` con el flujo existente.
-4. Configura en Render `CORS_ORIGINS=https://DOMINIO_FRONTEND`.
+4. Configura en Render y en el API Gateway AWS el origen del frontend en sus políticas CORS.
 5. Añade el dominio definitivo a los dominios autorizados de Firebase Authentication.
 
 El frontend no puede ni debe eludir CORS desde el navegador.

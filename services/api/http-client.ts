@@ -1,6 +1,7 @@
 import { appConfig } from '@/config/app-config';
 import { authService } from '@/services/auth/auth.service';
 import type { Endpoint } from '@/services/api/endpoints';
+import { resolveApiRequest } from '@/services/api/request-routing';
 
 export type DomainErrorCode =
   | 'BAD_REQUEST'
@@ -45,8 +46,11 @@ function buildUrl(
   params: Record<string, string> = {},
   query: Query = {},
 ) {
-  const baseUrl = appConfig.apiGatewayUrl.replace(/\/+$/, '');
-  const path = endpoint.path.replace(/\{(\w+)\}/g, (_, name: string) =>
+  const route = resolveApiRequest(endpoint, {
+    renderUrl: appConfig.renderApiGatewayUrl,
+    awsUrl: appConfig.awsApiGatewayUrl,
+  });
+  const path = route.path.replace(/\{(\w+)\}/g, (_, name: string) =>
     encodeURIComponent(params[name] ?? ''),
   );
   const search = new URLSearchParams(
@@ -54,7 +58,7 @@ function buildUrl(
       .filter(([, value]) => value !== undefined && value !== '')
       .map(([key, value]) => [key, String(value)]),
   ).toString();
-  return `${baseUrl}${path}${search ? `?${search}` : ''}`;
+  return { url: `${route.baseUrl}${path}${search ? `?${search}` : ''}`, method: route.method };
 }
 
 export async function gatewayRequest<T>(
@@ -70,8 +74,9 @@ export async function gatewayRequest<T>(
   const token = options.public ? null : await authService.idToken();
   let response: Response;
   try {
-    response = await fetch(buildUrl(endpoint, options.params, options.query), {
-      method: endpoint.method,
+    const request = buildUrl(endpoint, options.params, options.query);
+    response = await fetch(request.url, {
+      method: request.method,
       headers: {
         Accept: 'application/json',
         ...(options.body !== undefined && !(options.body instanceof FormData)
@@ -95,6 +100,9 @@ export async function gatewayRequest<T>(
       error?: string;
       message?: string;
       fieldErrors?: Record<string, string>;
+      codigo?: string;
+      mensaje?: string;
+      campos?: Record<string, string>;
     };
     const code: DomainErrorCode =
       response.status === 400
@@ -117,9 +125,9 @@ export async function gatewayRequest<T>(
     throw new DomainError(code, {
       status: response.status,
       retryable: response.status >= 500,
-      fieldErrors: payload.fieldErrors,
-      message: payload.message,
-      serverCode: payload.error,
+      fieldErrors: payload.fieldErrors ?? payload.campos,
+      message: payload.message ?? payload.mensaje,
+      serverCode: payload.error ?? payload.codigo,
     });
   }
   if (response.status === 204) return undefined as T;
