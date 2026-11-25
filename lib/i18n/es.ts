@@ -626,7 +626,7 @@ export const es = {
     },
     methodHints: {
       CARD: 'Visa, Mastercard o American Express',
-      WALLET: 'Confirmación inmediata y comprobante registrado',
+      WALLET: 'Se abre Mercado Pago para completar el pago',
       ACCOUNT_MONEY: 'Saldo disponible en tu cuenta',
       CASH: 'Código para pagar en agentes o banca',
     },
@@ -644,10 +644,11 @@ export const es = {
     rentalLocked: 'Disponible cuando la garantía esté constituida.',
     guaranteeDone: 'Garantía constituida correctamente.',
     rentalDone: 'Pago de la tarifa aprobado.',
-    payWithProvider: 'Confirmar pago de {amount}',
-    processing: 'Procesando pago…',
+    payWithProvider: 'Pagar {amount} con Mercado Pago',
+    resumeWithProvider: 'Continuar el pago en Mercado Pago',
+    processing: 'Abriendo Mercado Pago…',
     providerPending:
-      'La operación fue registrada y está siendo confirmada.',
+      'Hay un pago iniciado en Mercado Pago. Si ya pagaste, la confirmación llega en unos segundos; si no, puedes continuarlo.',
     allDone:
       'Listo: el pago y la garantía están confirmados. El prestamista ya puede registrar la entrega.',
     security:
@@ -656,6 +657,32 @@ export const es = {
       'La garantía se devuelve al finalizar el préstamo sin incidencias pendientes.',
     closedTitle: 'Esta reserva ya no admite pagos',
     closedDescription: 'La reserva fue cancelada o el préstamo ya inició.',
+  },
+  paymentReturn: {
+    eyebrow: 'Mercado Pago',
+    continue: 'Continuar',
+    tryAgain: 'Intentar de nuevo',
+    viewTransactions: 'Ver mis movimientos',
+    unknownTitle: 'No pudimos identificar el pago',
+    unknownDescription:
+      'Revisa su estado en tus movimientos; se actualiza cuando Mercado Pago lo confirma.',
+    confirmed: {
+      title: 'Pago confirmado',
+      description: 'Mercado Pago confirmó el pago y LendUp ya lo registró.',
+      status: 'Confirmado',
+    },
+    rejected: {
+      title: 'El pago no se completó',
+      description:
+        'Mercado Pago no aprobó el pago o fue cancelado. Puedes intentarlo de nuevo.',
+      status: 'No completado',
+    },
+    pending: {
+      title: 'Estamos confirmando tu pago',
+      description:
+        'Mercado Pago lo está procesando. Esta página se actualiza sola; también puedes volver más tarde.',
+      status: 'Pendiente de confirmación',
+    },
   },
   delivery: {
     eyebrow: 'Entrega del objeto',
@@ -1478,6 +1505,10 @@ export const es = {
     payment: {
       guaranteeConfirmed: 'Garantía constituida correctamente.',
       rentalConfirmed: 'Pago de la tarifa confirmado correctamente.',
+      redirecting: 'Te llevamos a Mercado Pago para completar el pago.',
+      alreadyConfirmed: 'Este pago ya estaba confirmado.',
+      checkoutUnavailable:
+        'Mercado Pago no está disponible en este momento. Intenta de nuevo en unos minutos.',
     },
     delivery: {
       recorded:

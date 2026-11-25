@@ -23,6 +23,10 @@ import { requestsService } from '@/services/requests.service';
 import { reservationsService } from '@/services/reservations.service';
 import { DomainError } from '@/services/api/http-client';
 import {
+  isTrustedCheckoutUrl,
+  rememberCheckout,
+} from '@/lib/payments-checkout';
+import {
   mapCurrentStudent,
   mapIncident,
   mapListing,
@@ -46,6 +50,7 @@ import type {
   IncidentDecision,
   Listing,
   ListingStatus,
+  PaymentPurpose,
   User,
 } from '@/types/domain';
 
@@ -597,25 +602,56 @@ export function useLendUp() {
       'results.reservation.cancelled',
       [queryKeys.reservations, queryKeys.loans],
     );
+  // lendup-payments-service creates a PENDIENTE transaction and a Checkout Pro preference; the
+  // payment is confirmed later by the Mercado Pago webhook, so here we only send the user there.
+  // Asking again while it is still pending returns the same transaction and checkout_url.
+  const startCheckout = async (
+    operation: () => Promise<BackendRow>,
+    checkout: { loanId: string; reservationId?: string; purpose: PaymentPurpose },
+  ): Promise<ActionResult> => {
+    try {
+      const transaction = await operation();
+      const transactionId = String(transaction.id ?? '');
+      if (
+        transaction.estado === 'PENDIENTE' &&
+        isTrustedCheckoutUrl(transaction.checkout_url)
+      ) {
+        rememberCheckout({
+          ...checkout,
+          transactionId,
+          startedAt: new Date().toISOString(),
+        });
+        window.location.assign(transaction.checkout_url);
+        return success('results.payment.redirecting', transactionId);
+      }
+      await invalidate(queryKeys.loans, queryKeys.reservations, [
+        'transactions',
+      ]);
+      return transaction.estado === 'CONFIRMADA'
+        ? success('results.payment.alreadyConfirmed', transactionId)
+        : failure('results.payment.checkoutUnavailable');
+    } catch (reason) {
+      return failureFrom(reason);
+    }
+  };
   const holdGuarantee = async (reservationId: string, methodId: string) => {
     const loan = loans.find((item) => item.reservationId === reservationId);
     if (!loan) return failure();
-    return action(
+    return startCheckout(
       () =>
         backendPaymentsService.guarantee(
           loan.id,
           methodId,
           crypto.randomUUID(),
         ),
-      'results.payment.guaranteeConfirmed',
-      [queryKeys.loans, queryKeys.reservations, ['transactions']],
+      { loanId: loan.id, reservationId, purpose: 'GUARANTEE' },
     );
   };
   const payRental = async (reservationId: string, methodId: string) => {
     const reservation = reservations.find((item) => item.id === reservationId);
     const loan = loans.find((item) => item.reservationId === reservationId);
     if (!loan || !reservation) return failure();
-    return action(
+    return startCheckout(
       () =>
         backendPaymentsService.pay({
           prestamo_id: loan.id,
@@ -624,8 +660,26 @@ export function useLendUp() {
           medio_pago_seleccionado: methodId,
           clave_idempotencia: crypto.randomUUID(),
         }),
-      'results.payment.rentalConfirmed',
-      [queryKeys.loans, queryKeys.reservations, ['transactions']],
+      { loanId: loan.id, reservationId, purpose: 'RENTAL' },
+    );
+  };
+  const payExtension = async (loanId: string, methodId: string) => {
+    const loan = loans.find((item) => item.id === loanId);
+    const extension = loan?.extensions.find(
+      (item) => item.status === 'PAYMENT_PENDING',
+    );
+    if (!loan || !extension) return failure();
+    return startCheckout(
+      () =>
+        backendPaymentsService.pay({
+          prestamo_id: loan.id,
+          cambio_fecha_prestamo_id: extension.id,
+          tipo: 'PAGO_EXTENSION',
+          monto: extension.additionalCost,
+          medio_pago_seleccionado: methodId,
+          clave_idempotencia: crypto.randomUUID(),
+        }),
+      { loanId: loan.id, purpose: 'EXTENSION' },
     );
   };
   const recordDelivery = async (
@@ -856,7 +910,7 @@ export function useLendUp() {
     confirmReceipt,
     requestExtension: unsupported,
     respondExtension: unsupported,
-    payExtension: unsupported,
+    payExtension,
     proposeReschedule,
     respondReschedule: unsupported,
     recordReturn,
