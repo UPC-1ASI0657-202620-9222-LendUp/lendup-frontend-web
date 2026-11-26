@@ -12,6 +12,7 @@ import { useLocation } from 'react-router-dom';
 import { FirebaseError } from 'firebase/app';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { authService } from '@/services/auth/auth.service';
+import { passwordResetOutcome } from '@/lib/password-reset';
 import { backendCatalogService } from '@/services/catalog-api.service';
 import { evidenceService } from '@/services/evidence.service';
 import { identityService } from '@/services/identity.service';
@@ -460,6 +461,16 @@ export function useLendUp() {
         ].includes(reason.code)
         ? failure('auth.errors.INVALID_CREDENTIALS')
         : failure();
+    }
+  };
+  const requestPasswordReset = async (email: string): Promise<ActionResult> => {
+    try {
+      await authService.sendPasswordReset(email.trim());
+      return passwordResetOutcome();
+    } catch (reason) {
+      return passwordResetOutcome(
+        reason instanceof FirebaseError ? reason.code : undefined,
+      );
     }
   };
   const logout = async () => {
@@ -923,6 +934,7 @@ export function useLendUp() {
     termsError: termsQuery.isError,
     retryTerms: () => termsQuery.refetch(),
     login,
+    requestPasswordReset,
     logout,
     registerUser,
     requestVerification,

@@ -96,6 +96,21 @@ export const es = {
       submit: 'Iniciar sesión',
       submitting: 'Ingresando…',
       noAccount: '¿Aún no tienes cuenta?',
+      forgotPassword: '¿Olvidaste tu contraseña?',
+    },
+    reset: {
+      title: 'Recupera tu contraseña',
+      description:
+        'Escribe tu correo institucional y te enviaremos un enlace para crear una nueva contraseña.',
+      submit: 'Enviar enlace',
+      submitting: 'Enviando…',
+      backToLogin: 'Volver a iniciar sesión',
+      errors: {
+        invalidEmail: 'Escribe un correo válido.',
+        tooManyRequests:
+          'Hiciste demasiados intentos. Espera unos minutos y vuelve a intentarlo.',
+        network: 'No pudimos conectarnos. Revisa tu conexión y reintenta.',
+      },
     },
     register: {
       completeTitle: 'Completa tu perfil universitario',
@@ -1453,6 +1468,8 @@ export const es = {
   results: {
     auth: {
       signedIn: 'Sesión iniciada.',
+      resetSent:
+        'Si el correo está registrado, te enviamos un enlace para cambiar tu contraseña. Revisa también la carpeta de spam.',
       registered: 'Cuenta creada correctamente.',
     },
     verification: {

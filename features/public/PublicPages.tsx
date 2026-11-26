@@ -170,6 +170,9 @@ export function LoginPage() {
             {...register('password')}
           />
         </Field>
+        <p className="auth-switch">
+          <Link to="/forgot-password">{t('auth.login.forgotPassword')}</Link>
+        </p>
         <Feedback result={result} />
         <Button type="submit" size="lg" disabled={isSubmitting}>
           {isSubmitting ? t('auth.login.submitting') : t('auth.login.submit')}
@@ -177,6 +180,57 @@ export function LoginPage() {
         <p className="auth-switch">
           {t('auth.login.noAccount')}{' '}
           <Link to="/register">{t('auth.register.cta')}</Link>
+        </p>
+      </form>
+    </AuthFrame>
+  );
+}
+
+export function ForgotPasswordPage() {
+  const { t } = useI18n();
+  const { requestPasswordReset } = useLendUp();
+  const schema = useMemo(
+    () => z.object({ email: z.string().trim().email(t('validation.email')) }),
+    [t],
+  );
+  type Values = z.infer<typeof schema>;
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<Values>({
+    resolver: zodResolver(schema),
+    defaultValues: { email: '' },
+  });
+  const [result, setResult] = useState<ActionResult | null>(null);
+
+  const submit = async (values: Values) =>
+    setResult(await requestPasswordReset(values.email));
+
+  return (
+    <AuthFrame
+      title={t('auth.reset.title')}
+      description={t('auth.reset.description')}
+    >
+      <form onSubmit={handleSubmit(submit)} className="auth-form" noValidate>
+        <Field
+          label={t('fields.institutionalEmail')}
+          error={errors.email?.message}
+          required
+        >
+          <input
+            type="email"
+            autoComplete="email"
+            inputMode="email"
+            {...register('email')}
+          />
+        </Field>
+        <Feedback result={result} />
+        <Button type="submit" size="lg" disabled={isSubmitting}>
+          {isSubmitting ? t('auth.reset.submitting') : t('auth.reset.submit')}
+        </Button>
+        <p className="auth-switch">
+          <Link to="/login">{t('auth.reset.backToLogin')}</Link>
         </p>
       </form>
     </AuthFrame>
