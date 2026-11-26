@@ -65,12 +65,16 @@ test('2. Explorar publicaciones y usar un filtro', async ({ page }) => {
   await expect(card).toBeVisible();
   await shot(page, '03-explorar-todas');
 
-  await page.getByRole('searchbox').fill(title);
+  await page
+    .getByRole('searchbox', { name: /por nombre o descripción/i })
+    .fill(title);
   await expect(page.getByText(title).first()).toBeVisible();
   await expect(page.locator('output.result-count')).toContainText('1');
   await shot(page, '04-explorar-filtro-nombre');
 
-  await page.getByRole('searchbox').fill(`no-existe-${run}`);
+  await page
+    .getByRole('searchbox', { name: /por nombre o descripción/i })
+    .fill(`no-existe-${run}`);
   await expect(page.getByText(title)).toHaveCount(0);
   await shot(page, '05-explorar-sin-resultados');
 });
@@ -148,10 +152,12 @@ test('5. Ver el préstamo y el calendario', async ({ page }) => {
     .toBeGreaterThan(0);
   await login(page, borrower);
   await page.goto('/loans');
+  // Recién aceptado, el préstamo está RESERVADO: aparece en "Por iniciar".
+  await page.getByRole('tab', { name: /por iniciar/i }).click();
   await expect(page.getByText(title).first()).toBeVisible();
   await shot(page, '10-prestamos');
   await page
-    .getByRole('link', { name: /abrir préstamo/i })
+    .getByText(/abrir préstamo/i)
     .first()
     .click();
   await expect(page).toHaveURL(/\/loans\/.+/);
