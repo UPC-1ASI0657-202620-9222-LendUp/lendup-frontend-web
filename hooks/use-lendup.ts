@@ -225,11 +225,13 @@ export function useLendUp() {
     );
   const listings = (listingsQuery.data ?? []).map(mapListing);
   const requests = (requestsQuery.data ?? []).map(mapRequest);
+  const incidentAgreements = new Map(incidentRows.flatMap((row) => {
+    const agreement = row.reserva as BackendRow | undefined;
+    return agreement?.id ? [[String(agreement.id), agreement] as const] : [];
+  }));
   const mappedReservations = uniqueRows([
     ...(reservationsQuery.data ?? []),
-    ...incidentRows.flatMap((row) =>
-      row.reserva ? [row.reserva as BackendRow] : [],
-    ),
+    ...[...incidentAgreements.values()].filter((agreement) => agreement.solicitud_id),
   ]).map((row) =>
     mapReservation(
       row,
@@ -241,14 +243,12 @@ export function useLendUp() {
       row.prestamo ? [row.prestamo as BackendRow] : [],
     ),
     ...(loansQuery.data ?? []),
-  ]).map((row) =>
-    mapLoan(
-      row,
-      mappedReservations.find(
-        (reservation) => reservation.id === String(row.reserva_id ?? ''),
-      ),
-    ),
-  );
+  ]).map((row) => {
+    const reservationId = String(row.reserva_id ?? '');
+    const agreement = incidentAgreements.get(reservationId);
+    return mapLoan(row, mappedReservations.find((reservation) => reservation.id === reservationId)
+      ?? (agreement ? mapReservation(agreement) : undefined));
+  });
   const reservations = reconcileReservationsWithLoans(
     mappedReservations,
     loans,
