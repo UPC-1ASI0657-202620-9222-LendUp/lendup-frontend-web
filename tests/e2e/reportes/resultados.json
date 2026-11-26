@@ -32,7 +32,9 @@
         "name": "chromium",
         "testDir": "/home/anderson/lendup/lendup-frontend-web/tests/e2e",
         "testIgnore": [],
-        "testMatch": ["**/*.spec.ts"],
+        "testMatch": [
+          "**/*.spec.ts"
+        ],
         "timeout": 90000
       }
     ],
@@ -80,7 +82,10 @@
     ],
     "quiet": false,
     "reporter": [
-      ["list", null],
+      [
+        "list",
+        null
+      ],
       [
         "html",
         {
@@ -156,12 +161,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1858,
+                  "duration": 3597,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-11-26T00:53:54.933Z",
+                  "startTime": "2026-11-26T00:59:43.589Z",
                   "annotations": [
                     {
                       "type": "serial",
@@ -208,12 +213,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4478,
+                  "duration": 3204,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-11-26T00:53:57.089Z",
+                  "startTime": "2026-11-26T00:59:47.558Z",
                   "annotations": [
                     {
                       "type": "serial",
@@ -260,12 +265,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4720,
+                  "duration": 3159,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-11-26T00:54:01.592Z",
+                  "startTime": "2026-11-26T00:59:50.779Z",
                   "annotations": [
                     {
                       "type": "serial",
@@ -284,7 +289,7 @@
           ],
           "id": "bb5c72e8760b76c82992-3e5fc1b372eca07e4b41",
           "file": "lendup.spec.ts",
-          "line": 78,
+          "line": 82,
           "column": 1
         },
         {
@@ -312,12 +317,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4140,
+                  "duration": 3250,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-11-26T00:54:06.332Z",
+                  "startTime": "2026-11-26T00:59:53.947Z",
                   "annotations": [
                     {
                       "type": "serial",
@@ -336,7 +341,7 @@
           ],
           "id": "bb5c72e8760b76c82992-590ed8f009d0bc2cdac4",
           "file": "lendup.spec.ts",
-          "line": 111,
+          "line": 115,
           "column": 1
         },
         {
@@ -364,12 +369,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 5717,
+                  "duration": 3822,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-11-26T00:54:10.489Z",
+                  "startTime": "2026-11-26T00:59:57.208Z",
                   "annotations": [
                     {
                       "type": "serial",
@@ -388,7 +393,7 @@
           ],
           "id": "bb5c72e8760b76c82992-2bd2c68de0eeefee9b72",
           "file": "lendup.spec.ts",
-          "line": 134,
+          "line": 138,
           "column": 1
         }
       ]
@@ -396,8 +401,8 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-11-26T00:53:52.978Z",
-    "duration": 23319.324999999997,
+    "startTime": "2026-11-26T00:59:32.982Z",
+    "duration": 28199.895,
     "expected": 5,
     "skipped": 0,
     "unexpected": 0,
