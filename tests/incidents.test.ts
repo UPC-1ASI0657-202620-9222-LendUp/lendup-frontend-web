@@ -62,6 +62,26 @@ test('resolved incident preserves justified decision and expected remaining bala
   assert.equal(incident.resolution?.refundedAmount, 80);
   assert.equal(incident.resolution?.decision, 'PARTIAL');
 });
+test('incident loan uses the guarantee agreed by Loans when a reservation is unavailable', () => {
+  const loan = mapLoan({ id: 'loan', garantia_monetaria_acordada: '50.00' });
+  assert.equal(loan.snapshot.guaranteeAmount, 50);
+});
+test('private reservation agreement keeps frozen terms and the acceptance instant in admin', () => {
+  const agreement = mapReservation({
+    id: 'reservation', desde: '2026-11-21T08:00:00', hasta: '2026-11-22T08:00:00',
+    condiciones_uso_acordadas: 'Uso académico', condiciones_entrega_acordadas: 'Entrega personal',
+    condiciones_devolucion_acordadas: 'Mismo estado', condiciones_cancelacion_acordadas: 'Antes de la entrega',
+    lugar_intercambio_acordado: 'Campus Monterrico', condiciones_aceptadas_en: '2026-11-20T12:00:00Z',
+    garantia_monetaria_acordada: 50,
+  });
+  const loan = mapLoan({ id: 'loan', reserva_id: agreement.id, garantia_monetaria_acordada: 50 }, agreement);
+  assert.equal(loan.snapshot.usage, 'Uso académico');
+  assert.equal(loan.snapshot.delivery, 'Entrega personal');
+  assert.equal(loan.snapshot.returnPolicy, 'Mismo estado');
+  assert.equal(loan.snapshot.cancellation, 'Antes de la entrega');
+  assert.equal(loan.snapshot.exchangePlace, 'Campus Monterrico');
+  assert.equal(new Date(loan.snapshot.acceptedAt).toISOString(), '2026-11-20T12:00:00.000Z');
+});
 test('admin incident loan keeps original agreement and comparison evidence', () => {
   const reservation = mapReservation({
     id: 'reservation',

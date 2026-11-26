@@ -255,7 +255,7 @@ export function mapReservation(
       returnPolicy: text(row, 'condiciones_devolucion_acordadas'),
       cancellation: text(row, 'condiciones_cancelacion_acordadas'),
       cancellationPolicy: { borrowerRefundRate: 0, lenderRefundRate: 0 },
-      acceptedAt: instant(row, 'confirmada_en'),
+      acceptedAt: optionalInstant(row, 'condiciones_aceptadas_en') ?? instant(row, 'confirmada_en'),
     },
   };
 }
@@ -316,7 +316,7 @@ export function mapLoan(row: BackendRow, reservation?: Reservation): Loan {
         : 'PENDING',
     snapshot: reservation?.snapshot ?? {
       dailyRate: number(row, 'tarifa_diaria_acordada'),
-      guaranteeAmount: 0,
+      guaranteeAmount: number(row, 'garantia_monetaria_acordada'),
       commissionRate: 0,
       providerFeeRate: 0,
       exchangePlace: '',

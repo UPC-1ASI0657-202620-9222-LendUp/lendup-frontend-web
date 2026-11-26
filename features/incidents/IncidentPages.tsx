@@ -892,6 +892,7 @@ export function AdminIncidentDetailPage() {
             [t('fields.usage'), loan.snapshot.usage],
             [t('fields.delivery'), loan.snapshot.delivery],
             [t('fields.returnPolicy'), loan.snapshot.returnPolicy],
+            [t('fields.cancellation'), loan.snapshot.cancellation],
             [t('fields.exchangePlace'), loan.snapshot.exchangePlace],
             [
               t('admin.agreedPeriod'),
