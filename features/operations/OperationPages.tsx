@@ -7,7 +7,7 @@ import {
   useParams,
   useSearchParams,
 } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -74,6 +74,12 @@ import {
   paymentsService,
   type PaymentMethod,
 } from '@/services/payments.service';
+import { backendPaymentsService } from '@/services/payments-api.service';
+import {
+  checkoutOutcome,
+  clearPendingCheckout,
+  readPendingCheckout,
+} from '@/lib/payments-checkout';
 import { useLendUp, type ActionResult } from '@/hooks/use-lendup';
 import {
   currentUserOf,
@@ -918,11 +924,6 @@ function PaymentStep({
               : 'checkout.rentalDone',
           )}
         </p>
-      ) : pending ? (
-        <p className="inline-status">
-          <CalendarClock aria-hidden="true" />
-          {t('checkout.providerPending')}
-        </p>
       ) : locked ? (
         <p className="inline-status">
           <ShieldCheck aria-hidden="true" />
@@ -930,6 +931,12 @@ function PaymentStep({
         </p>
       ) : (
         <>
+          {pending && (
+            <p className="inline-status">
+              <CalendarClock aria-hidden="true" />
+              {t('checkout.providerPending')}
+            </p>
+          )}
           <MethodPicker
             purpose={purpose}
             value={methodId}
@@ -948,7 +955,11 @@ function PaymentStep({
           >
             {busy
               ? t('checkout.processing')
-              : t('checkout.payWithProvider', { amount: formatMoney(amount) })}
+              : pending
+                ? t('checkout.resumeWithProvider')
+                : t('checkout.payWithProvider', {
+                    amount: formatMoney(amount),
+                  })}
           </Button>
         </>
       )}
@@ -977,12 +988,15 @@ export function CheckoutPage() {
   const checkoutLoan = state.loans.find(
     (loan) => loan.reservationId === reservation.id,
   );
-  const guaranteeSubmitted = state.transactions.some(
-    (transaction) =>
-      transaction.loanId === checkoutLoan?.id &&
-      transaction.type === 'GUARANTEE_HOLD' &&
-      ['PENDING', 'PROCESSING'].includes(transaction.status),
-  );
+  const submitted = (type: 'GUARANTEE_HOLD' | 'RENTAL_PAYMENT') =>
+    state.transactions.some(
+      (transaction) =>
+        transaction.loanId === checkoutLoan?.id &&
+        transaction.type === type &&
+        ['PENDING', 'PROCESSING'].includes(transaction.status),
+    );
+  const guaranteeSubmitted = submitted('GUARANTEE_HOLD');
+  const rentalSubmitted = submitted('RENTAL_PAYMENT');
   const closed = reservation.status !== 'CONFIRMED';
 
   return (
@@ -1038,6 +1052,7 @@ export function CheckoutPage() {
               status={reservation.paymentStatus}
               done={rentalDone}
               locked={!guaranteeDone}
+              pending={rentalSubmitted}
               onPay={(method) => payRental(reservation.id, method)}
             />
             <div className="app-banner info">
@@ -1052,6 +1067,92 @@ export function CheckoutPage() {
           </aside>
         </div>
       )}
+    </>
+  );
+}
+
+/** back_urls of Checkout Pro land here; the transaction state comes from lendup-payments-service, never from the URL. */
+export function PaymentReturnPage() {
+  const { t } = useI18n();
+  const [params] = useSearchParams();
+  const queryClient = useQueryClient();
+  const [checkout] = useState(readPendingCheckout);
+  const transactionId =
+    params.get('external_reference') || checkout?.transactionId || '';
+  const loanId = checkout?.loanId ?? '';
+  const query = useQuery({
+    queryKey: ['payment-return', loanId, transactionId],
+    queryFn: ({ signal }) => backendPaymentsService.transactions(loanId, signal),
+    enabled: Boolean(loanId && transactionId),
+    refetchInterval: (current) => {
+      const row = current.state.data?.find(
+        (item) => String(item.id) === transactionId,
+      );
+      return checkoutOutcome(row?.estado) === 'PENDING' &&
+        current.state.dataUpdateCount < 20
+        ? 3000
+        : false;
+    },
+  });
+  const row = query.data?.find((item) => String(item.id) === transactionId);
+  const outcome = checkoutOutcome(row?.estado);
+  useEffect(() => {
+    if (outcome === 'PENDING') return;
+    clearPendingCheckout();
+    void queryClient.invalidateQueries({ queryKey: ['loans'] });
+    void queryClient.invalidateQueries({ queryKey: ['reservations'] });
+    void queryClient.invalidateQueries({ queryKey: ['transactions'] });
+  }, [outcome, queryClient]);
+
+  if (!loanId || !transactionId)
+    return (
+      <EmptyState
+        title={t('paymentReturn.unknownTitle')}
+        description={t('paymentReturn.unknownDescription')}
+        action={t('paymentReturn.viewTransactions')}
+        href="/transactions"
+      />
+    );
+  if (query.isError) return <ErrorState onRetry={() => query.refetch()} />;
+  const notCompleted =
+    outcome === 'PENDING' && params.get('result') === 'failure';
+  const view =
+    outcome === 'CONFIRMED'
+      ? 'confirmed'
+      : outcome === 'REJECTED' || notCompleted
+        ? 'rejected'
+        : 'pending';
+  const back = checkout?.reservationId
+    ? `/reservations/${checkout.reservationId}/checkout`
+    : `/loans/${loanId}`;
+  return (
+    <>
+      <PageHeader
+        eyebrow={t('paymentReturn.eyebrow')}
+        title={t(`paymentReturn.${view}.title`)}
+        description={t(`paymentReturn.${view}.description`)}
+      />
+      <section className="panel">
+        <p
+          className={`inline-status ${view === 'confirmed' ? 'success' : view === 'rejected' ? 'warning' : ''}`}
+        >
+          {view === 'confirmed' ? (
+            <CheckCircle2 aria-hidden="true" />
+          ) : view === 'rejected' ? (
+            <AlertTriangle aria-hidden="true" />
+          ) : (
+            <CalendarClock aria-hidden="true" />
+          )}
+          {t(`paymentReturn.${view}.status`)}
+        </p>
+        <Button render={<Link to={back} />}>
+          {t(
+            view === 'rejected'
+              ? 'paymentReturn.tryAgain'
+              : 'paymentReturn.continue',
+          )}
+        </Button>
+      </section>
     </>
   );
 }
@@ -1417,7 +1518,7 @@ export function LoanDetailPage() {
   if (isBorrower && payableExtension)
     add(
       'payExtension',
-      <Button disabled title={t('common.backendGap')}>
+      <Button onClick={() => setDialog('payExtension')}>
         {t('loanDetail.actions.payExtension', {
           amount: formatMoney(payableExtension.additionalCost),
         })}
