@@ -95,6 +95,20 @@ export const en: Messages = {
       submit: 'Sign in',
       submitting: 'Signing in…',
       noAccount: "Don't have an account yet?",
+      forgotPassword: 'Forgot your password?',
+    },
+    reset: {
+      title: 'Reset your password',
+      description:
+        'Enter your university email and we will send you a link to create a new password.',
+      submit: 'Send link',
+      submitting: 'Sending…',
+      backToLogin: 'Back to sign in',
+      errors: {
+        invalidEmail: 'Enter a valid email.',
+        tooManyRequests: 'Too many attempts. Wait a few minutes and try again.',
+        network: 'We could not connect. Check your connection and retry.',
+      },
     },
     register: {
       completeTitle: 'Complete your university profile',
@@ -1425,6 +1439,8 @@ export const en: Messages = {
   results: {
     auth: {
       signedIn: 'Signed in.',
+      resetSent:
+        'If the email is registered, we sent you a link to change your password. Also check your spam folder.',
       registered: 'Account created successfully.',
     },
     verification: {

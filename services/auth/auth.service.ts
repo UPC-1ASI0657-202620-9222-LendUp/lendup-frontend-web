@@ -3,6 +3,7 @@ import {
   onIdTokenChanged,
   sendEmailVerification,
   reload,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
   type User as FirebaseUser,
@@ -48,6 +49,11 @@ export const authService = {
     await user.getIdToken(true);
     return user.emailVerified;
   },
+  /** Firebase sends the reset link; the link returns the student to the login page. */
+  sendPasswordReset: async (email: string) =>
+    sendPasswordResetEmail(auth(), email, {
+      url: window.location.origin + '/login',
+    }),
   logout: async () => signOut(auth()),
   idToken: async (forceRefresh = false) =>
     firebaseAuth?.currentUser?.getIdToken(forceRefresh) ?? null,

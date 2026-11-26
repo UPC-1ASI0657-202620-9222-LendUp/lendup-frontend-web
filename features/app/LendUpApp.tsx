@@ -9,6 +9,7 @@ import { NotFound } from '@/components/lendup/shared';
 import { I18nProvider, useI18n } from '@/lib/i18n';
 import { AuthProvider } from '@/features/auth/AuthProvider';
 import {
+  ForgotPasswordPage,
   LoginPage,
   RegisterPage,
   TermsPage,
@@ -79,6 +80,7 @@ function AppRoutes() {
         <Route element={<PublicOnlyRoute />}>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         </Route>
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
