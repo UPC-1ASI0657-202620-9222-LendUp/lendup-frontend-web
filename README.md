@@ -20,24 +20,18 @@ Firebase es la fuente de verdad de la sesión. Cada llamada protegida obtiene el
 
 ## Configuración
 
-Copia `.env.example` a `.env.local` y completa únicamente valores públicos del cliente Firebase:
+Copia `.env.example` a `.env.local` y deja activo **un** perfil. Solo van valores públicos del cliente Firebase.
 
-```env
-VITE_API_GATEWAY_URL=https://lendup-backend.onrender.com/api/v1
-VITE_FIREBASE_API_KEY=
-VITE_FIREBASE_AUTH_DOMAIN=
-VITE_FIREBASE_PROJECT_ID=
-VITE_FIREBASE_APP_ID=
-VITE_FIREBASE_MESSAGING_SENDER_ID=
-VITE_FIREBASE_STORAGE_BUCKET=
-VITE_GOOGLE_MAPS_API_KEY=
-VITE_DEFAULT_LOCALE=es
-VITE_TIME_ZONE=America/Lima
-```
+| Variable | Local (`lendup-e2e`) | Producción (AWS) |
+|---|---|---|
+| `VITE_API_GATEWAY_URL` | `http://localhost:8090/api/v1` | `https://<gateway-aws>/api/v1` (pendiente: aún no se tiene la URL) |
+| `VITE_FIREBASE_AUTH_EMULATOR_URL` | `http://localhost:9099` (solo `npm run dev`) | no definir |
+| `VITE_FIREBASE_PROJECT_ID` | `lendup-desarrollo` (debe coincidir con el de los microservicios) | el del proyecto Firebase real |
+| `VITE_FIREBASE_API_KEY`, `_AUTH_DOMAIN`, `_APP_ID` | cualquier valor no vacío (`emulador`, `localhost`, `local`) | los de la consola de Firebase |
+
+El gateway enruta Catálogo (`/catalogo/**`), Identidad (`/estudiantes`, `/universidades`, `/documentos/terminos`), Reservas, Préstamos, Pagos, Notificaciones y Reputación a sus microservicios. Evidencias e Incidencias siguen en el monolito hasta que exista su servicio.
 
 No uses credenciales Firebase Admin, service accounts, claves privadas de MySQL, Mercado Pago, Cloudinary o Gemini. Toda variable `VITE_*` es visible en el navegador.
-
-Para el backend local usa `VITE_API_GATEWAY_URL=http://localhost:8080/api/v1`. El proyecto Firebase del cliente debe coincidir con el configurado en el backend.
 
 ## Desarrollo y validación
 
