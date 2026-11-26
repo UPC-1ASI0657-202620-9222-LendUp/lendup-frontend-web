@@ -37,6 +37,7 @@ import {
 import type {
   BackendRow,
   CreatePublicationRequestDto,
+  PublicationSnapshotDto,
   UpdatePublicationRequestDto,
 } from '@/services/api/dto/backend';
 import type { MessageKey } from '@/lib/i18n/types';
@@ -141,6 +142,21 @@ function publicationBody(
     ...(Object.keys(detalles).length ? { detalles } : {}),
     ...(Object.keys(condiciones).length ? { condiciones } : {}),
   };
+}
+
+function snapshotDiffers(
+  listing: Listing,
+  snapshot: PublicationSnapshotDto,
+): boolean {
+  return (
+    listing.dailyRate !== Number(snapshot.tarifa_diaria) ||
+    listing.guaranteeAmount !== Number(snapshot.garantia_monetaria ?? 0) ||
+    listing.exchangePlace !== snapshot.lugar_intercambio ||
+    listing.terms.usage !== snapshot.condiciones_uso ||
+    listing.terms.delivery !== snapshot.condiciones_entrega ||
+    listing.terms.returnPolicy !== snapshot.condiciones_devolucion ||
+    listing.terms.cancellation !== snapshot.condiciones_cancelacion
+  );
 }
 
 const incidentType = (type: Incident['type']) =>
@@ -572,17 +588,37 @@ export function useLendUp() {
       'results.availability.deleted',
       [queryKeys.listings],
     );
-  const createRequest = (
+  const createRequest = async (
     listingId: string,
     startAt: string,
     endAt: string,
     _message?: string,
-  ) =>
-    action(
-      () => requestsService.create(listingId, startAt, endAt),
-      'results.request.created',
-      [queryKeys.requests],
-    );
+  ) => {
+    try {
+      // Catálogo es la fuente de las condiciones: se envía su snapshot tal cual.
+      const snapshot = await backendCatalogService.snapshot(
+        listingId,
+        startAt,
+        endAt,
+      );
+      if (snapshot.estado !== 'ACTIVA' || !snapshot.periodo_ofrecido)
+        return failure('results.request.listingUnavailable');
+      const shown = listings.find((listing) => listing.id === listingId);
+      if (shown && snapshotDiffers(shown, snapshot)) {
+        await invalidate(queryKeys.listings);
+        return failure('results.request.conditionsChanged');
+      }
+      await requestsService.create(listingId, startAt, endAt, {
+        snapshot_id: snapshot.snapshot_id,
+        snapshot_hash: snapshot.snapshot_hash,
+        aceptada: true,
+      });
+      await invalidate(queryKeys.requests);
+      return success('results.request.created');
+    } catch (reason) {
+      return failureFrom(reason);
+    }
+  };
   const cancelRequest = (id: string) =>
     action(() => requestsService.cancel(id), 'results.request.cancelled', [
       queryKeys.requests,

@@ -641,8 +641,7 @@ export const en: Messages = {
     rentalDone: 'Rate payment approved.',
     payWithProvider: 'Confirm payment of {amount}',
     processing: 'Processing payment…',
-    providerPending:
-      'The operation was recorded and is being confirmed.',
+    providerPending: 'The operation was recorded and is being confirmed.',
     allDone:
       'Done: payment and deposit are confirmed. The lender can now record the handover.',
     security:
@@ -1436,6 +1435,8 @@ export const en: Messages = {
       invalidRange: 'The end date must be after the start date.',
       pastStart: 'The period must start in the future.',
       periodTaken: 'That period was already reserved by another request.',
+      conditionsChanged:
+        'The lender changed the conditions while you were reviewing them. Review them again and accept once more.',
     },
     reservation: {
       cancelled:

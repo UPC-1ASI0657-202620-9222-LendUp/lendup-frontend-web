@@ -646,8 +646,7 @@ export const es = {
     rentalDone: 'Pago de la tarifa aprobado.',
     payWithProvider: 'Confirmar pago de {amount}',
     processing: 'Procesando pago…',
-    providerPending:
-      'La operación fue registrada y está siendo confirmada.',
+    providerPending: 'La operación fue registrada y está siendo confirmada.',
     allDone:
       'Listo: el pago y la garantía están confirmados. El prestamista ya puede registrar la entrega.',
     security:
@@ -1467,6 +1466,8 @@ export const es = {
       invalidRange: 'La fecha final debe ser posterior a la inicial.',
       pastStart: 'El periodo debe comenzar en el futuro.',
       periodTaken: 'Ese periodo ya fue reservado por otra solicitud.',
+      conditionsChanged:
+        'El prestamista cambió las condiciones mientras las revisabas. Revísalas de nuevo y vuelve a aceptar.',
     },
     reservation: {
       cancelled:
