@@ -1463,6 +1463,8 @@ export const en: Messages = {
       invalidRange: 'The end date must be after the start date.',
       pastStart: 'The period must start in the future.',
       periodTaken: 'That period was already reserved by another request.',
+      conditionsChanged:
+        'The lender changed the conditions while you were reviewing them. Review them again and accept once more.',
     },
     reservation: {
       cancelled:

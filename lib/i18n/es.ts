@@ -1494,6 +1494,8 @@ export const es = {
       invalidRange: 'La fecha final debe ser posterior a la inicial.',
       pastStart: 'El periodo debe comenzar en el futuro.',
       periodTaken: 'Ese periodo ya fue reservado por otra solicitud.',
+      conditionsChanged:
+        'El prestamista cambió las condiciones mientras las revisabas. Revísalas de nuevo y vuelve a aceptar.',
     },
     reservation: {
       cancelled:

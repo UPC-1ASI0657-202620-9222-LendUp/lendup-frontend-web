@@ -1,0 +1,411 @@
+{
+  "config": {
+    "argv": [
+      "/home/anderson/.nvm/versions/node/v24.16.0/bin/node",
+      "/home/anderson/lendup/lendup-frontend-web/node_modules/.bin/playwright",
+      "test"
+    ],
+    "configFile": "/home/anderson/lendup/lendup-frontend-web/playwright.config.ts",
+    "rootDir": "/home/anderson/lendup/lendup-frontend-web/tests/e2e",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/home/anderson/lendup/lendup-frontend-web/tests/e2e/reportes/artefactos",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/home/anderson/lendup/lendup-frontend-web/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.spec.ts"
+        ],
+        "timeout": 90000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "/home/anderson/lendup/lendup-frontend-web/tests/e2e/reportes/artefactos",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "chromium",
+        "testDir": "/home/anderson/lendup/lendup-frontend-web/tests/e2e",
+        "snapshotDir": "/home/anderson/lendup/lendup-frontend-web/tests/e2e",
+        "testIgnore": [],
+        "testMatch": "**/*.spec.ts",
+        "timeout": 90000,
+        "use": {
+          "baseURL": "http://localhost:3000",
+          "locale": "es-PE",
+          "timezoneId": "America/Lima",
+          "viewport": {
+            "width": 1280,
+            "height": 720
+          },
+          "screenshot": "only-on-failure",
+          "trace": "retain-on-failure",
+          "launchOptions": {},
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/159.0.8154.6 Safari/537.36",
+          "screen": {
+            "width": 1920,
+            "height": 1080
+          },
+          "deviceScaleFactor": 1,
+          "isMobile": false,
+          "hasTouch": false,
+          "defaultBrowserType": "chromium"
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "chromium"
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "html",
+        {
+          "outputFolder": "tests/e2e/reportes/html",
+          "open": "never"
+        }
+      ],
+      [
+        "json",
+        {
+          "outputFile": "tests/e2e/reportes/resultados.json"
+        }
+      ],
+      [
+        "/home/anderson/lendup/lendup-frontend-web/tests/e2e/support/markdown-reporter.ts",
+        null
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.65.1",
+    "workers": 1,
+    "webServer": {
+      "command": "npm run dev",
+      "url": "http://localhost:3000",
+      "reuseExistingServer": true,
+      "timeout": 120000,
+      "env": {
+        "VITE_API_GATEWAY_URL": "http://localhost:8090/api/v1",
+        "VITE_FIREBASE_AUTH_EMULATOR_URL": "http://localhost:9099",
+        "VITE_FIREBASE_API_KEY": "emulador",
+        "VITE_FIREBASE_AUTH_DOMAIN": "localhost",
+        "VITE_FIREBASE_PROJECT_ID": "lendup-desarrollo",
+        "VITE_FIREBASE_APP_ID": "local"
+      }
+    }
+  },
+  "suites": [
+    {
+      "title": "lendup.spec.ts",
+      "file": "lendup.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "1. Iniciar sesión con el emulador de Firebase",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "/home/anderson/lendup/lendup-frontend-web/tests/e2e/lendup.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4135,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-26T13:34:14.978Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/home/anderson/lendup/lendup-frontend-web/tests/e2e/lendup.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bb5c72e8760b76c82992-cd8b183cdfa83bbe5d3a",
+          "file": "lendup.spec.ts",
+          "line": 52,
+          "column": 1
+        },
+        {
+          "title": "2. Explorar publicaciones y usar un filtro",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "/home/anderson/lendup/lendup-frontend-web/tests/e2e/lendup.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3681,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-26T13:34:20.121Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/home/anderson/lendup/lendup-frontend-web/tests/e2e/lendup.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bb5c72e8760b76c82992-41a6d0079b8ae0f6ece4",
+          "file": "lendup.spec.ts",
+          "line": 61,
+          "column": 1
+        },
+        {
+          "title": "3. Crear una solicitud como prestatario",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "/home/anderson/lendup/lendup-frontend-web/tests/e2e/lendup.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4161,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-26T13:34:23.826Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/home/anderson/lendup/lendup-frontend-web/tests/e2e/lendup.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bb5c72e8760b76c82992-3e5fc1b372eca07e4b41",
+          "file": "lendup.spec.ts",
+          "line": 82,
+          "column": 1
+        },
+        {
+          "title": "4. Aceptar la solicitud como prestamista",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "/home/anderson/lendup/lendup-frontend-web/tests/e2e/lendup.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3810,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-26T13:34:28.000Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/home/anderson/lendup/lendup-frontend-web/tests/e2e/lendup.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bb5c72e8760b76c82992-590ed8f009d0bc2cdac4",
+          "file": "lendup.spec.ts",
+          "line": 115,
+          "column": 1
+        },
+        {
+          "title": "5. Ver el préstamo y el calendario",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "/home/anderson/lendup/lendup-frontend-web/tests/e2e/lendup.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4071,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-26T13:34:31.824Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/home/anderson/lendup/lendup-frontend-web/tests/e2e/lendup.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bb5c72e8760b76c82992-2bd2c68de0eeefee9b72",
+          "file": "lendup.spec.ts",
+          "line": 138,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-11-26T13:34:06.717Z",
+    "duration": 29315.683999999997,
+    "expected": 5,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

@@ -21,13 +21,16 @@ describe('Filtros del catálogo', () => {
   it('envía todos los filtros usando el identificador real de categoría', () => {
     assert.deepEqual(toCatalogQuery(filters), {
       nombre: 'cámara científica',
-      categoria: categoryIds.CAMERAS,
+      categoriaId: categoryIds.CAMERAS,
       universidad: 'UPC',
       campus: 'Monterrico',
-      ubicacion: 'Santiago de Surco',
       desde: '2026-10-06T12:00',
       hasta: '2026-10-08T12:00',
     });
+  });
+
+  it('la ubicación se filtra en el cliente: Catálogo no la acepta', () => {
+    assert.equal('ubicacion' in toCatalogQuery(filters), false);
   });
 
   it('no aplica fechas hasta tener un periodo completo y válido', () => {

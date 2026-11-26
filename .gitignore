@@ -91,3 +91,9 @@ next-env.d.ts
 # Editors and OS
 .DS_Store
 .vscode-test
+
+# Playwright E2E: keep captures + reporte.md as evidence, drop bulky outputs
+tests/e2e/reportes/html/
+tests/e2e/reportes/artefactos/
+test-results/
+playwright-report/

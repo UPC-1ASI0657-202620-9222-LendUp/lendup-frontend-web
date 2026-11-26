@@ -1,6 +1,9 @@
 import { endpoints } from '@/services/api/endpoints';
 import { gatewayRequest } from '@/services/api/http-client';
-import type { BackendRow } from '@/services/api/dto/backend';
+import type {
+  BackendRow,
+  TermsAcceptanceSnapshotDto,
+} from '@/services/api/dto/backend';
 import { toApiLocalDateTime } from '@/lib/dates';
 
 export const requestsService = {
@@ -13,12 +16,18 @@ export const requestsService = {
       params: { id },
       signal,
     }),
-  create: (publicacionId: string, desde: string, hasta: string) =>
+  create: (
+    publicacionId: string,
+    desde: string,
+    hasta: string,
+    aceptacion: TermsAcceptanceSnapshotDto,
+  ) =>
     gatewayRequest<BackendRow>(endpoints.requests.createRequest, {
       body: {
         publicacion_id: publicacionId,
         desde: toApiLocalDateTime(desde),
         hasta: toApiLocalDateTime(hasta),
+        aceptacion_condiciones: aceptacion,
       },
     }),
   accept: (id: string) =>

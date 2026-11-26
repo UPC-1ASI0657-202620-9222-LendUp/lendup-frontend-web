@@ -133,7 +133,14 @@ function availabilitySlots(row: BackendRow): Listing['availabilitySlots'] {
   });
 }
 
+const section = (row: BackendRow, key: string): BackendRow =>
+  row[key] && typeof row[key] === 'object' ? (row[key] as BackendRow) : {};
+
+// Catálogo responde { id, propietarioUsuarioId, detalles{}, condiciones{},
+// estado, disponibilidades[] } en camelCase; `imagenes` lo adjunta el servicio.
 export function mapListing(row: BackendRow): Listing {
+  const details = section(row, 'detalles');
+  const conditions = section(row, 'condiciones');
   const images = (
     Array.isArray(row.imagenes) ? row.imagenes : []
   ) as BackendRow[];
@@ -144,21 +151,21 @@ export function mapListing(row: BackendRow): Listing {
       id: text(image, 'id'),
       type: 'PHOTO' as const,
       url: text(image, 'url'),
-      name: text(row, 'titulo'),
+      name: text(details, 'titulo'),
     }));
   return {
     id: text(row, 'id'),
-    ownerId: text(row, 'propietario_usuario_id'),
-    title: text(row, 'titulo'),
-    category: categoryCodeForId(text(row, 'categoria_id')),
-    description: text(row, 'descripcion'),
-    condition: condition(text(row, 'condicion_objeto')),
-    universityId: text(row, 'universidad'),
-    campus: text(row, 'campus'),
-    location: text(row, 'ubicacion'),
-    exchangePlace: text(row, 'lugar_intercambio'),
-    dailyRate: number(row, 'tarifa_diaria'),
-    guaranteeAmount: number(row, 'garantia_monetaria'),
+    ownerId: text(row, 'propietarioUsuarioId'),
+    title: text(details, 'titulo'),
+    category: categoryCodeForId(text(details, 'categoriaId')),
+    description: text(details, 'descripcion'),
+    condition: condition(text(details, 'condicionObjeto')),
+    universityId: text(details, 'universidad'),
+    campus: text(details, 'campus'),
+    location: text(details, 'ubicacion'),
+    exchangePlace: text(conditions, 'lugarIntercambio'),
+    dailyRate: number(conditions, 'tarifaDiaria'),
+    guaranteeAmount: number(conditions, 'garantiaMonetaria'),
     status:
       text(row, 'estado') === 'PAUSADA'
         ? 'PAUSED'
@@ -169,12 +176,13 @@ export function mapListing(row: BackendRow): Listing {
     media,
     availabilitySlots: availabilitySlots(row),
     terms: {
-      usage: text(row, 'condiciones_uso'),
-      delivery: text(row, 'condiciones_entrega'),
-      returnPolicy: text(row, 'condiciones_devolucion'),
-      cancellation: text(row, 'condiciones_cancelacion'),
+      usage: text(conditions, 'condicionesUso'),
+      delivery: text(conditions, 'condicionesEntrega'),
+      returnPolicy: text(conditions, 'condicionesDevolucion'),
+      cancellation: text(conditions, 'condicionesCancelacion'),
     },
-    createdAt: instant(row, 'creado_en'),
+    // Catálogo no expone fecha de creación.
+    createdAt: new Date(0).toISOString(),
   };
 }
 
