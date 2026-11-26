@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { photoSelectionError, MAX_PHOTO_BYTES } from '../lib/listing-photos.ts';
+import { categoryIds } from '../config/reference-data.ts';
 import { mapListing, mapLoan } from '../services/api/mappers/domain.ts';
 test('photo selection enforces type, size and total count', () => {
   assert.equal(
@@ -26,7 +27,7 @@ test('photo selection enforces type, size and total count', () => {
 });
 test('catalog maps saved photos in order and uses first as cover', () => {
   const listing = mapListing({
-    titulo: 'Cámara',
+    detalles: { titulo: 'Cámara' },
     imagenes: [
       {
         id: 'second',
@@ -43,6 +44,38 @@ test('catalog maps saved photos in order and uses first as cover', () => {
 test('old publications without photos keep their placeholder', () => {
   assert.equal(mapListing({}).image, '/brand/logo-mark-on-light.webp');
   assert.deepEqual(mapListing({}).media, []);
+});
+test('catalog maps the nested camelCase publication contract', () => {
+  const listing = mapListing({
+    id: 'pub-1',
+    propietarioUsuarioId: 'owner-1',
+    estado: 'PAUSADA',
+    detalles: {
+      categoriaId: categoryIds.CALCULATORS,
+      titulo: 'Calculadora Casio',
+      descripcion: 'Científica',
+      condicionObjeto: 'GOOD',
+      universidad: 'UPC',
+      campus: 'Monterrico',
+      ubicacion: 'Pabellón A',
+    },
+    condiciones: {
+      tarifaDiaria: 20,
+      garantiaMonetaria: 50,
+      lugarIntercambio: 'Campus Monterrico',
+      condicionesUso: 'Uso académico',
+      condicionesEntrega: 'Personal',
+      condicionesDevolucion: 'Mismo estado',
+      condicionesCancelacion: 'Antes de la entrega',
+    },
+  });
+  assert.equal(listing.ownerId, 'owner-1');
+  assert.equal(listing.category, 'CALCULATORS');
+  assert.equal(listing.dailyRate, 20);
+  assert.equal(listing.guaranteeAmount, 50);
+  assert.equal(listing.status, 'PAUSED');
+  assert.equal(listing.exchangePlace, 'Campus Monterrico');
+  assert.equal(listing.terms.cancellation, 'Antes de la entrega');
 });
 test('catalog preserves available and reserved periods returned by the backend', () => {
   const listing = mapListing({

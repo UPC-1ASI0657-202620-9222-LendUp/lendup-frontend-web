@@ -4,6 +4,7 @@ import type {
   BackendRow,
   CreateStudentRequestDto,
   CurrentStudentDto,
+  TermsDocumentDto,
 } from '@/services/api/dto/backend';
 
 export const identityService = {
@@ -18,7 +19,6 @@ export const identityService = {
     }),
   updateMe: (body: {
     nombre?: string;
-    universidad?: string;
     campus?: string;
     carrera?: string;
     ciclo?: number;
@@ -28,6 +28,11 @@ export const identityService = {
   requestVerification: (reference: string) =>
     gatewayRequest<BackendRow>(endpoints.identity.verification, {
       body: { verificacion_referencia: reference },
+    }),
+  terms: (signal?: AbortSignal) =>
+    gatewayRequest<TermsDocumentDto>(endpoints.identity.terms, {
+      signal,
+      public: true,
     }),
   acceptTerms: (termsVersion: string, disclaimerVersion: string) =>
     gatewayRequest<BackendRow>(endpoints.identity.acceptTerms, {

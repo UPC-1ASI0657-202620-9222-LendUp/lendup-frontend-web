@@ -37,6 +37,7 @@ import {
 import type {
   BackendRow,
   CreatePublicationRequestDto,
+  UpdatePublicationRequestDto,
 } from '@/services/api/dto/backend';
 import type { MessageKey } from '@/lib/i18n/types';
 import type {
@@ -105,37 +106,40 @@ const queryKeys = {
 
 function publicationBody(
   listing: Partial<NewListing>,
-): Partial<CreatePublicationRequestDto> {
-  return {
-    ...(listing.category
-      ? { categoria_id: categoryIds[listing.category] }
-      : {}),
+): UpdatePublicationRequestDto {
+  const detalles: UpdatePublicationRequestDto['detalles'] = {
+    ...(listing.category ? { categoriaId: categoryIds[listing.category] } : {}),
     ...(listing.title ? { titulo: listing.title } : {}),
     ...(listing.description ? { descripcion: listing.description } : {}),
-    ...(listing.condition ? { condicion_objeto: listing.condition } : {}),
+    ...(listing.condition ? { condicionObjeto: listing.condition } : {}),
     ...(listing.universityId ? { universidad: listing.universityId } : {}),
     ...(listing.campus ? { campus: listing.campus } : {}),
     ...(listing.location ? { ubicacion: listing.location } : {}),
+  };
+  const condiciones: UpdatePublicationRequestDto['condiciones'] = {
     ...(listing.exchangePlace
-      ? { lugar_intercambio: listing.exchangePlace }
+      ? { lugarIntercambio: listing.exchangePlace }
       : {}),
     ...(listing.dailyRate !== undefined
-      ? { tarifa_diaria: listing.dailyRate }
+      ? { tarifaDiaria: listing.dailyRate }
       : {}),
     ...(listing.guaranteeAmount !== undefined
-      ? { garantia_monetaria: listing.guaranteeAmount }
+      ? { garantiaMonetaria: listing.guaranteeAmount }
       : {}),
-    moneda: 'PEN',
-    ...(listing.terms?.usage ? { condiciones_uso: listing.terms.usage } : {}),
+    ...(listing.terms?.usage ? { condicionesUso: listing.terms.usage } : {}),
     ...(listing.terms?.delivery
-      ? { condiciones_entrega: listing.terms.delivery }
+      ? { condicionesEntrega: listing.terms.delivery }
       : {}),
     ...(listing.terms?.returnPolicy
-      ? { condiciones_devolucion: listing.terms.returnPolicy }
+      ? { condicionesDevolucion: listing.terms.returnPolicy }
       : {}),
     ...(listing.terms?.cancellation
-      ? { condiciones_cancelacion: listing.terms.cancellation }
+      ? { condicionesCancelacion: listing.terms.cancellation }
       : {}),
+  };
+  return {
+    ...(Object.keys(detalles).length ? { detalles } : {}),
+    ...(Object.keys(condiciones).length ? { condiciones } : {}),
   };
 }
 
@@ -165,7 +169,7 @@ export function useLendUp() {
 
   const listingsQuery = useQuery({
     queryKey: queryKeys.listings,
-    queryFn: ({ signal }) => backendCatalogService.search({}, signal),
+    queryFn: ({ signal }) => backendCatalogService.listings(signal),
     enabled,
   });
   const requestsQuery = useQuery({
@@ -190,7 +194,7 @@ export function useLendUp() {
   });
   const termsQuery = useQuery({
     queryKey: queryKeys.terms,
-    queryFn: ({ signal }) => backendCatalogService.terms(signal),
+    queryFn: ({ signal }) => identityService.terms(signal),
     enabled: true,
     staleTime: 60_000,
   });
@@ -454,7 +458,6 @@ export function useLendUp() {
       const result = await identityService.register({
         correo_institucional: data.email,
         nombre: data.name,
-        universidad: data.universityId,
         campus: data.campus,
         carrera: data.career,
         ciclo: Number(data.cycle),
@@ -511,9 +514,14 @@ export function useLendUp() {
   };
   const createListing = async (listing: NewListing) => {
     try {
-      const row = await backendCatalogService.create(
-        publicationBody(listing) as CreatePublicationRequestDto,
-      );
+      const body = publicationBody(listing);
+      const row = await backendCatalogService.create({
+        detalles: body.detalles as CreatePublicationRequestDto['detalles'],
+        condiciones: {
+          ...body.condiciones,
+          moneda: 'PEN',
+        } as CreatePublicationRequestDto['condiciones'],
+      });
       await invalidate(queryKeys.listings);
       return success('results.listing.published', String(row.id ?? ''));
     } catch (reason) {
@@ -636,12 +644,7 @@ export function useLendUp() {
     if (!loan) return failure();
     try {
       for (const item of evidence.filter((entry) => entry.file)) {
-        await evidenceService.upload(
-          loan.id,
-          'ENTREGA',
-          item.file!,
-          item.id,
-        );
+        await evidenceService.upload(loan.id, 'ENTREGA', item.file!, item.id);
       }
       for (const item of evidence.filter(
         (entry) => entry.type === 'NOTE' && entry.description.trim(),
@@ -679,12 +682,7 @@ export function useLendUp() {
   ) => {
     try {
       for (const item of evidence.filter((entry) => entry.file)) {
-        await evidenceService.upload(
-          loanId,
-          'DEVOLUCION',
-          item.file!,
-          item.id,
-        );
+        await evidenceService.upload(loanId, 'DEVOLUCION', item.file!, item.id);
       }
       if (notes.trim()) {
         await evidenceService.create(loanId, {
